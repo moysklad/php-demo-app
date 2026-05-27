@@ -10,11 +10,11 @@ $authContext = resolveBackendContextFromSession();
 
 if (!$authContext) {
     http_response_code(401);
-    exit('Ошибка авторизации: передайте contextKey и откройте iframe/виджет заново.');
+    exit('Ошибка авторизации: откройте iframe/виджет заново.');
 }
 
 $entity = trim((string)($_GET['entity'] ?? ''));
-$objectId = trim((string)($_GET['objectId'] ?? ''));
+$objectId = requestBodyValue('objectId') ?? trim((string)($_GET['objectId'] ?? ''));
 
 if (!isset($entitiesMap[$entity])) {
     http_response_code(400);

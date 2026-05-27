@@ -307,7 +307,7 @@
                         <?php } ?>
                     </select>
                 </div>
-                <input type="hidden" name="contextKey" value="<?= escHtml($contextKey) ?>"/>
+                <input type="hidden" name="contextNonce" value="<?= escHtml($contextNonce) ?>"/>
                 <button class="btn" type="submit">Сохранить</button>
             </form>
         <?php } elseif (!$isAdmin) { ?>
