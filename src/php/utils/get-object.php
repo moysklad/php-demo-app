@@ -14,7 +14,7 @@ if (!$authContext) {
 }
 
 $entity = trim((string)($_GET['entity'] ?? ''));
-$objectId = requestBodyValue('objectId') ?? trim((string)($_GET['objectId'] ?? ''));
+$objectId = requestBodyValue('objectId') ?? '';
 
 if (!isset($entitiesMap[$entity])) {
     http_response_code(400);

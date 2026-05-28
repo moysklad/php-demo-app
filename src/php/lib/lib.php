@@ -211,7 +211,11 @@ function resolveBackendContextFromSession(): ?array
 function requestBodyValue(string $name): ?string
 {
     if (array_key_exists($name, $_POST)) {
-        return scalarRequestValue($_POST[$name]);
+        $value = scalarRequestValue($_POST[$name]);
+
+        if ($value !== null) {
+            return $value;
+        }
     }
 
     $jsonBody = requestJsonBody();
@@ -225,6 +229,7 @@ function requestBodyValue(string $name): ?string
 
 function requestJsonBody(): array
 {
+    // php://input читаем и декодируем один раз на запрос: contextNonce и objectId могут понадобиться разным helper-ам.
     static $jsonBody = null;
 
     if ($jsonBody !== null) {
@@ -234,18 +239,40 @@ function requestJsonBody(): array
     $jsonBody = [];
     $contentType = (string)($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '');
 
-    if (stripos($contentType, 'application/json') === false) {
+    if (!isJsonContentType($contentType)) {
         return $jsonBody;
     }
 
     $rawBody = file_get_contents('php://input');
-    $decoded = json_decode((string)$rawBody, true);
 
-    if (is_array($decoded)) {
-        $jsonBody = $decoded;
+    if ($rawBody === false || trim($rawBody) === '') {
+        return $jsonBody;
     }
 
+    $decoded = json_decode((string)$rawBody, true);
+
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        log_message('WARN', 'Failed to decode JSON request body: ' . json_last_error_msg());
+
+        return $jsonBody;
+    }
+
+    if (!is_array($decoded) || array_is_list($decoded)) {
+        log_message('WARN', 'JSON request body must be an object');
+
+        return $jsonBody;
+    }
+
+    $jsonBody = $decoded;
+
     return $jsonBody;
+}
+
+function isJsonContentType(string $contentType): bool
+{
+    $mediaType = strtolower(trim(explode(';', $contentType, 2)[0]));
+
+    return $mediaType === 'application/json';
 }
 
 function scalarRequestValue(mixed $value): ?string
@@ -378,10 +405,12 @@ function makeHttpRequest(string $method, string $url, string $bearerToken, mixed
 
     if ($statusCode >= 400) {
         log_message('WARN', "HTTP $statusCode for $method $url");
+
+        return null;
     }
 
     if ($body === '') {
-        return null;
+        return $statusCode >= 200 && $statusCode < 300;
     }
 
     $decoded = json_decode($body);
