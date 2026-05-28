@@ -378,10 +378,12 @@ function makeHttpRequest(string $method, string $url, string $bearerToken, mixed
 
     if ($statusCode >= 400) {
         log_message('WARN', "HTTP $statusCode for $method $url");
+
+        return null;
     }
 
     if ($body === '') {
-        return null;
+        return $statusCode >= 200 && $statusCode < 300;
     }
 
     $decoded = json_decode($body);
