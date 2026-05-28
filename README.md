@@ -125,7 +125,6 @@ php src/php/utils/generate-descriptor.php
 * `api/button.php`                   - обработка нажатий кастомных кнопок
 * `lib/lib.php`                      - общие классы приложения (конфигурация, модели данных, врапперы доступа к API МоегоСклада)
 * `lib/app-repo.php`                 - репозиторий для хранения установок приложения (SQLite)
-* `lib/jwt.lib.php`                  - JWT PHP библиотека (копипаст из https://github.com/firebase/php-jwt)
 * `lib/jwt-repo.php`                 - репозиторий для хранения и проверки одноразовости JWT (JTI)
 * `lib/user-context-loader.inc.php`  - общий код получения контекста пользователя через Vendor API
 * `config.example.php`               - пример конфигурации (используйте как шаблон для `config.php`)

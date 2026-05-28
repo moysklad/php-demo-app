@@ -1,9 +1,9 @@
 <?php
 
 use \Firebase\JWT\JWT;
+use \Firebase\JWT\Key;
 
 require_once __DIR__ . '/../lib/lib.php';
-require_once __DIR__ . '/../lib/jwt.lib.php';
 
 require_once __DIR__ . '/button.php';
 
@@ -182,7 +182,7 @@ function authTokenIsValid(array $headers): bool
     }
 
     try {
-        $decoded = JWT::decode($jwtToken, $secretKey, ["HS256"]);
+        $decoded = JWT::decode($jwtToken, new Key($secretKey, 'HS256'));
 
         if (empty($decoded->exp)) {
             log_message('WARN', "EXP is not set");

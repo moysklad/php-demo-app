@@ -440,7 +440,7 @@ function buildJWT(): string
         'jti' => bin2hex(random_bytes(32)),
     ];
 
-    return JWT::encode($token, cfg()->secretKey);
+    return JWT::encode($token, cfg()->secretKey, 'HS256');
 }
 
 // JSON API 1.2
