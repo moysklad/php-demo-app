@@ -13,11 +13,19 @@ RUN apt-get update && apt-get install -y \
 # Устанавливаем расширения PHP
 RUN docker-php-ext-install zip opcache curl pdo_sqlite
 
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
 # Включаем модуль Apache rewrite
 #RUN a2enmod rewrite
 
-# Копируем файлы приложения
+# Устанавливаем Composer-зависимости отдельным слоем, чтобы кэшировать их между правками PHP-кода
+COPY composer.json composer.lock /var/www/html/
+WORKDIR /var/www/html
+RUN composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader --no-scripts
+
+# Копируем файлы приложения и обновляем autoload
 COPY . /var/www/html/
+RUN composer dump-autoload --no-dev --optimize
 
 # Создаём config.php из примера если его нет в контексте сборки
 RUN if [ ! -f /var/www/html/src/php/config.php ]; then \

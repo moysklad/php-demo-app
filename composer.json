@@ -1,0 +1,10 @@
+{
+    "name": "moysklad/php-dummyapp-marketplace",
+    "description": "PHP demo app for MoySklad Vendor API integration",
+    "license": "proprietary",
+    "type": "project",
+    "require": {
+        "php": ">=8.0",
+        "firebase/php-jwt": "^7.0"
+    }
+}

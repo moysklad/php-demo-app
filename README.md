@@ -20,6 +20,36 @@
 Для запросов в МойСклад данное решение использует библиотеку `curl`. 
 Обратитесь к [документации](https://www.php.net/manual/ru/book.curl.php), для того чтобы настроить её для локальной разработки.
 
+## Быстрый старт
+
+Порты:
+* Docker Compose — `http://localhost:8085` по умолчанию (`APP_PORT=...` переопределяет внешний порт)
+* Apache внутри контейнера — `${APACHE_PORT:-8085}`
+
+Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+Проверка:
+
+```bash
+curl -sS http://localhost:8085/utils/generate-descriptor.php
+```
+
+Локальные CLI-проверки без запуска контейнера:
+
+```bash
+cp src/php/config.example.php src/php/config.php
+composer install
+php -l src/php/lib/lib.php
+php src/php/utils/generate-descriptor.php
+```
+
+Для локальной разработки можно задать переменные окружения в `.env`; `docker-compose.yml` уже содержит значения по умолчанию для демо-запуска.
+Значение `APP_ENCRYPT_KEY` из compose-файла является заглушкой и не подходит для production.
+
 ## Виджеты
 
 Решение встраивает виджеты на следующие экраны:
