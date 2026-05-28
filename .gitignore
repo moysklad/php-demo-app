@@ -1,4 +1,3 @@
-src/php/config.php
 src/php/data/*.app
 src/php/data/*.sqlite
 src/php/data/*.sqlite-wal

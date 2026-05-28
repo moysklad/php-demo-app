@@ -22,9 +22,12 @@
 
 ## Быстрый старт
 
+Порты и параметры приложения задаются в `.env.example` — это единственный источник значений по умолчанию.
+Для локальных переопределений скопируйте файл: `cp .env.example .env`.
+
 Порты:
-* Docker Compose — `http://localhost:8085` по умолчанию (`APP_PORT=...` переопределяет внешний порт)
-* Apache внутри контейнера — `${APACHE_PORT:-8085}`
+* Docker Compose — `http://localhost:8085` по умолчанию (`APP_PORT` в `.env` переопределяет внешний порт)
+* Apache внутри контейнера — `APACHE_PORT` из `.env.example`
 
 Docker Compose:
 
@@ -41,14 +44,12 @@ curl -sS http://localhost:8085/utils/generate-descriptor.php
 Локальные CLI-проверки без запуска контейнера:
 
 ```bash
-cp src/php/config.example.php src/php/config.php
+cp .env.example .env
+set -a && source .env && set +a
 composer install
 php -l src/php/lib/lib.php
 php src/php/utils/generate-descriptor.php
 ```
-
-Для локальной разработки можно задать переменные окружения в `.env`; `docker-compose.yml` уже содержит значения по умолчанию для демо-запуска.
-Значение `APP_ENCRYPT_KEY` из compose-файла является заглушкой и не подходит для production.
 
 ## Виджеты
 
@@ -100,8 +101,7 @@ php src/php/utils/generate-descriptor.php
 
 ## Настройка (конфигурирование) решения
 
-Перед использованием решения нужно настроить следующие конфигурационные параметры 
-через переменные окружения (рекомендуется) либо напрямую в `config.php` (копия `config.example.php`):
+Перед использованием решения настройте конфигурационные параметры в [`.env.example`](.env.example) или в локальной копии `.env`.
 
 * `APP_ID`                          - идентификатор решения в МоемСкладе
 * `APP_UID`                         - appUid решения в МоемСкладе
@@ -115,6 +115,8 @@ php src/php/utils/generate-descriptor.php
 ### Основные файлы и точки входа
 
 * `Dockerfile`                       - конфигурация для запуска решения в docker-контейнере
+* `.env.example`                     - значения конфигурационных параметров по умолчанию
+* `composer.json`, `composer.lock`   - зависимости от сторонних библиотек, включая `firebase/php-jwt` для JWT
 * `entry/iframe.php`                 - контроллер отображения содержимого iframe
 * `entry/popup.php`                  - контроллер отображения popup
 * `entry/widget-customerorder.php`   - контроллер виджета для Заказа покупателя
