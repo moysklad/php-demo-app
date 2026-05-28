@@ -20,4 +20,6 @@ return [
     'secretKey' => getenv('APP_SECRET_KEY'),
     'databasePath' => getenv('APP_DB_PATH'),
     'encryptKey' => getenv('APP_ENCRYPT_KEY'),
+    'moyskladVendorApiEndpointUrl' => getenv('MOYSKLAD_VENDOR_API_URL'),
+    'moyskladJsonApiEndpointUrl' => getenv('MOYSKLAD_JSON_API_URL'),
 ];

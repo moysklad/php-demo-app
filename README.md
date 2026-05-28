@@ -109,6 +109,8 @@ php src/php/utils/generate-descriptor.php
 * `APP_BASE_URL`                    - базовый URL решения, должен указывать на содержимое `./src/php` (сейчас используется при генерации дескриптора)
 * `APP_DB_PATH`                     - путь до файла SQLite с серверным состоянием решения (опционально, по умолчанию `src/php/data/app.sqlite`)
 * `APP_ENCRYPT_KEY`                 - ключ шифрования `access_token` в БД (сгенерировать: `bin2hex(sodium_crypto_secretbox_keygen())`). **Не менять** после установки: токены в БД станут нерасшифровываемы.
+* `MOYSKLAD_VENDOR_API_URL`         - базовый URL Vendor API (без завершающего слэша)
+* `MOYSKLAD_JSON_API_URL`           - базовый URL JSON API 1.2 (без завершающего слэша)
 
 ## Структура файлов решения
 

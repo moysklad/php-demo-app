@@ -2,7 +2,7 @@
 
 use \Firebase\JWT\JWT;
 
-require_once __DIR__ . '/jwt.lib.php';
+require_once __DIR__ . '/../../../vendor/autoload.php';
 
 // Конфигурация
 
@@ -14,9 +14,8 @@ class AppConfig
     public string $appBaseUrl = '';
     public string $databasePath = '';
     public string $encryptKey = '';
-
-    public string $moyskladVendorApiEndpointUrl = 'https://apps-api.moysklad.ru/api/vendor/1.0';
-    public string $moyskladJsonApiEndpointUrl = 'https://api.moysklad.ru/api/remap/1.2';
+    public string $moyskladVendorApiEndpointUrl = '';
+    public string $moyskladJsonApiEndpointUrl = '';
 
     public function __construct(array $cfg)
     {
