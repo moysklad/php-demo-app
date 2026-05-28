@@ -12,16 +12,14 @@ if (!isset($entity) || !is_string($entity) || $entity === '') {
     throw new LogicException('widget.inc.php requires a non-empty entity name');
 }
 
-/** @var array{uid: string, fio: string, contextKey?: string} $context */
+/** @var array{uid: string, fio: string, contextNonce: string} $context */
 $uid = (string)$context['uid'];
 $fio = (string)$context['fio'];
-$contextKey = (string)($context['contextKey'] ?? '');
+$contextNonce = (string)$context['contextNonce'];
 
-// Явно передаем contextKey, чтобы backend выбрал нужный контекст из сессии
-// и не смешивал его с другими окнами/виджетами этого домена.
+// contextNonce передается в теле POST-запроса, а не в URL.
 $getObjectUrl = '/utils/get-object.php?' . http_build_query([
         'entity' => $entity,
-        'contextKey' => $contextKey,
-    ]) . '&objectId=';
+    ]);
 
 require __DIR__ . '/widget.html.php';

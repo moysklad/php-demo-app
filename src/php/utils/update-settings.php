@@ -6,7 +6,7 @@ $authContext = resolveBackendContextFromSession();
 
 if (!$authContext) {
     http_response_code(401);
-    exit('Ошибка авторизации: передайте contextKey и откройте iframe заново.');
+    exit('Ошибка авторизации: откройте iframe заново.');
 }
 
 if (empty($authContext['isAdmin'])) {
