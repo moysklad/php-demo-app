@@ -119,6 +119,8 @@ php src/php/utils/generate-descriptor.php
 * `Dockerfile`                       - конфигурация для запуска решения в docker-контейнере
 * `.env.example`                     - значения конфигурационных параметров по умолчанию
 * `composer.json`, `composer.lock`   - зависимости от сторонних библиотек, включая `firebase/php-jwt` для JWT
+* `config.php`                       - конфигурация решения
+* `docker-compose.yml`               - конфигурация для запуска в режиме разработки. Каталог `src/php` смонтирован в контейнер: изменения PHP-кода и данных в `src/php/data/` применяются без пересборки образа 
 * `entry/iframe.php`                 - контроллер отображения содержимого iframe
 * `entry/popup.php`                  - контроллер отображения popup
 * `entry/widget-customerorder.php`   - контроллер виджета для Заказа покупателя
@@ -131,7 +133,6 @@ php src/php/utils/generate-descriptor.php
 * `lib/app-repo.php`                 - репозиторий для хранения установок приложения (SQLite)
 * `lib/jwt-repo.php`                 - репозиторий для хранения и проверки одноразовости JWT (JTI)
 * `lib/user-context-loader.inc.php`  - общий код получения контекста пользователя через Vendor API
-* `config.example.php`               - пример конфигурации (используйте как шаблон для `config.php`)
 
 ### Файлы виджетов
 
