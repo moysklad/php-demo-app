@@ -26,8 +26,8 @@
 Для локальных переопределений скопируйте файл: `cp .env.example .env`.
 
 Порты:
-* Docker Compose — `http://localhost:8085` по умолчанию (`APP_PORT` в `.env` переопределяет внешний порт)
-* Apache внутри контейнера — `APACHE_PORT` из `.env.example`
+* Apache внутри контейнера слушает **80**
+* С хоста — `http://localhost:8085` по умолчанию (`APP_PORT` в `.env` — внешний порт, маппится на 80 в контейнере)
 
 Docker Compose:
 
@@ -107,10 +107,10 @@ php src/php/utils/generate-descriptor.php
 * `APP_UID`                         - appUid решения в МоемСкладе
 * `APP_SECRET_KEY`                  - секретный ключ для подписи JWT запросов Vendor API
 * `APP_BASE_URL`                    - базовый URL решения, должен указывать на содержимое `./src/php` (сейчас используется при генерации дескриптора)
-* `APP_DB_PATH`                     - путь до файла SQLite с серверным состоянием решения (опционально, по умолчанию `src/php/data/app.sqlite`)
+* `APP_DB_PATH`                     - опционально: путь к SQLite; по умолчанию `src/php/data/app.sqlite` 
 * `APP_ENCRYPT_KEY`                 - ключ шифрования `access_token` в БД (сгенерировать: `bin2hex(sodium_crypto_secretbox_keygen())`). **Не менять** после установки: токены в БД станут нерасшифровываемы.
-* `MOYSKLAD_VENDOR_API_URL`         - базовый URL Vendor API (без завершающего слэша)
-* `MOYSKLAD_JSON_API_URL`           - базовый URL JSON API 1.2 (без завершающего слэша)
+* `MOYSKLAD_VENDOR_API_URL`         - опционально: переопределить URL Vendor API (по умолчанию в `config.php`: `https://apps-api.moysklad.ru/api/vendor/1.0`)
+* `MOYSKLAD_JSON_API_URL`           - опционально: переопределить URL JSON API 1.2 (по умолчанию в `config.php`: `https://api.moysklad.ru/api/remap/1.2`)
 
 ## Структура файлов решения
 
@@ -154,7 +154,7 @@ php src/php/utils/generate-descriptor.php
 
 ### Данные
 
-Серверное состояние установок решений хранится в `SQLite` через `PDO` (`pdo_sqlite`), файл `src/php/data/app.sqlite` (переопределяется через `APP_DB_PATH`).
+Серверное состояние установок решений хранится в `SQLite` через `PDO` (`pdo_sqlite`), по умолчанию файл `src/php/data/app.sqlite` (путь вычисляется в `appDatabasePath()`, переопределение — через `APP_DB_PATH`).
 При первом обращении backend автоматически создаёт файл БД и таблицу `account_application`.
 В таблице хранится серверное состояние установки по ключу `(account_id, application_id)`:
 токен доступа к JSON API (зашифрован через `sodium_crypto_secretbox`), статус приложения и настройки (`infoMessage`, `store`).
