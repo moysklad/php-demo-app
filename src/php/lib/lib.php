@@ -48,6 +48,25 @@ function cfg(): AppConfig
     return $GLOBALS['cfg'];
 }
 
+function appVersion(): string
+{
+    static $version = null;
+
+    if ($version !== null) {
+        return $version;
+    }
+
+    $composerJson = dirname(__DIR__, 3) . '/composer.json';
+    if (!is_readable($composerJson)) {
+        return $version = 'dev';
+    }
+
+    $data = json_decode((string)file_get_contents($composerJson), true);
+    $version = (is_array($data) && !empty($data['version'])) ? (string)$data['version'] : 'dev';
+
+    return $version;
+}
+
 function escHtml($value): string
 {
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');

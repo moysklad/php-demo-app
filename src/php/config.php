@@ -18,8 +18,10 @@ return [
     'appUid' => getenv('APP_UID'),
     'appBaseUrl' => getenv('APP_BASE_URL'),
     'secretKey' => getenv('APP_SECRET_KEY'),
-    'databasePath' => getenv('APP_DB_PATH'),
+    'databasePath' => getenv('APP_DB_PATH') ?: '',
     'encryptKey' => getenv('APP_ENCRYPT_KEY'),
-    'moyskladVendorApiEndpointUrl' => getenv('MOYSKLAD_VENDOR_API_URL'),
-    'moyskladJsonApiEndpointUrl' => getenv('MOYSKLAD_JSON_API_URL'),
+    'moyskladVendorApiEndpointUrl' => getenv('MOYSKLAD_VENDOR_API_URL')
+        ?: 'https://apps-api.moysklad.ru/api/vendor/1.0',
+    'moyskladJsonApiEndpointUrl' => getenv('MOYSKLAD_JSON_API_URL')
+        ?: 'https://api.moysklad.ru/api/remap/1.2',
 ];

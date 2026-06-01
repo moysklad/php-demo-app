@@ -12,14 +12,16 @@ services:
       - /bin/sh
       - -lc
       - |
-        DATA_DIR="$$(dirname "$${APP_DB_PATH:-/var/www/html/src/php/data/app.sqlite}")"
+        if [ -n "$${APP_DB_PATH:-}" ]; then
+          DATA_DIR="$$(dirname "$$APP_DB_PATH")"
+        else
+          DATA_DIR="/var/www/html/src/php/data"
+        fi
         mkdir -p "$$DATA_DIR"
         chown -R www-data:www-data "$$DATA_DIR"
         chmod 775 "$$DATA_DIR"
-        sed -ri "s/^Listen 80$$/Listen $${APACHE_PORT}/" /etc/apache2/ports.conf
-        sed -ri "s/<VirtualHost \\*:80>/<VirtualHost *:$${APACHE_PORT}>/g" /etc/apache2/sites-available/*.conf
         exec apache2-foreground
     ports:
-      - "${APP_PORT:-8085}:${APACHE_PORT:-8085}"
+      - "${APP_PORT:-8085}:80"
     volumes:
       - ./src/php:/var/www/html/src/php
