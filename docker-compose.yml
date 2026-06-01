@@ -3,20 +3,23 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    env_file:
+      - path: .env.example
+        required: true
+      - path: .env
+        required: false
     command:
       - /bin/sh
       - -lc
       - |
+        DATA_DIR="$$(dirname "$${APP_DB_PATH:-/var/www/html/src/php/data/app.sqlite}")"
+        mkdir -p "$$DATA_DIR"
+        chown -R www-data:www-data "$$DATA_DIR"
+        chmod 775 "$$DATA_DIR"
         sed -ri "s/^Listen 80$$/Listen $${APACHE_PORT}/" /etc/apache2/ports.conf
         sed -ri "s/<VirtualHost \\*:80>/<VirtualHost *:$${APACHE_PORT}>/g" /etc/apache2/sites-available/*.conf
-        apache2-foreground
+        exec apache2-foreground
     ports:
       - "${APP_PORT:-8085}:${APACHE_PORT:-8085}"
-    environment:
-      APP_ID: ${APP_ID:-195d5446-9da8-47ee-abb9-e808e4f283d7}
-      APP_UID: ${APP_UID:-php-demo-app.moysklad}
-      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8085}
-      APP_SECRET_KEY: ${APP_SECRET_KEY:-secret-key-example}
-      APP_DB_PATH: ${APP_DB_PATH:-/var/www/html/src/php/data/app.sqlite}
-      APP_ENCRYPT_KEY: ${APP_ENCRYPT_KEY:-0000000000000000000000000000000000000000000000000000000000000000} # заглушка для локальной разработки, замените на реальный ключ
-      APACHE_PORT: ${APACHE_PORT:-8085}
+    volumes:
+      - ./src/php:/var/www/html/src/php

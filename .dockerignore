@@ -1,11 +1,11 @@
+.git/
+.idea/
+.tools/
+vendor/
+.env
+.env.local
 src/php/data/*.app
 src/php/data/*.sqlite
 src/php/data/*.sqlite-wal
 src/php/data/*.sqlite-shm
-vendor/
-.tools/
-.env
-.env.local
-.idea
-*.iml
 **/.DS_Store
