@@ -9,6 +9,7 @@
 /** @var string|null $store */
 /** @var bool $isSettingsRequired */
 /** @var string[] $storesValues */
+/** @var string $appVersion */
 ?>
 <!doctype html>
 <html lang="ru">
@@ -192,6 +193,12 @@
             padding: var(--space-md) 20px 20px;
         }
 
+        .app-version {
+            margin: 0 0 10px;
+            font-size: var(--font-size-sm);
+            color: var(--muted);
+        }
+
         .info-list {
             margin: 0;
             padding-left: 18px;
@@ -297,6 +304,7 @@
         </ul>
         <div class="panel-divider"></div>
         <h2>Состояние решения</h2>
+        <p class="app-version">Версия <?= $appVersion ?></p>
         <div id="appStatus" class="status-box <?= $isSettingsRequired ? 'status-required' : 'status-ready' ?>">
             <div id="appStatusTitle" class="status-title">
                 <?= $isSettingsRequired ? 'ТРЕБУЕТСЯ НАСТРОЙКА' : 'РЕШЕНИЕ ГОТОВО К РАБОТЕ' ?>

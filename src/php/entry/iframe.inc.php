@@ -22,6 +22,7 @@ $app = AppInstance::loadApp($accountId);
 $infoMessage = $app->infoMessage;
 $store = $app->store;
 $isSettingsRequired = $app->status !== AppInstance::ACTIVATED;
+$appVersion = appVersion();
 $storesValues = [];
 
 if (empty($app->accessToken)) {
