@@ -8,20 +8,21 @@ if (!isset($context) || !is_array($context)) {
     throw new LogicException('iframe.inc.php requires a user context array');
 }
 
-/** @var array{accountId: string, isAdmin: bool, uid: string, fio: string, contextKey?: string} $context */
+/** @var array{accountId: string, isAdmin: bool, uid: string, fio: string, contextNonce: string} $context */
 $contextName = 'IFRAME';
 
 $accountId = (string)$context['accountId'];
 $isAdmin = (bool)$context['isAdmin'];
 $uid = (string)$context['uid'];
 $fio = (string)$context['fio'];
-$contextKey = (string)($context['contextKey'] ?? '');
+$contextNonce = (string)$context['contextNonce'];
 
 $app = AppInstance::loadApp($accountId);
 
 $infoMessage = $app->infoMessage;
 $store = $app->store;
 $isSettingsRequired = $app->status !== AppInstance::ACTIVATED;
+$appVersion = appVersion();
 $storesValues = [];
 
 if (empty($app->accessToken)) {

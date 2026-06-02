@@ -2,6 +2,7 @@
 /** @var string $uid */
 /** @var string $fio */
 /** @var string $getObjectUrl */
+/** @var string $contextNonce */
 ?>
 <!doctype html>
 <html lang="ru">
@@ -261,7 +262,7 @@
     <script type="text/javascript"
             src="https://cdn.jsdelivr.net/npm/@moysklad-official/js-widget-sdk@1/dist/widget.min.js"></script>
 </head>
-<body>
+<body data-context-nonce="<?= escHtml($contextNonce) ?>">
 <main>
     <section class="panel settings">
         <h2 title="Информацию о текущем пользователе виджет может получить на своем бэкенде через Vendor API">
@@ -521,8 +522,16 @@
 
             if (objectEl && getObjectUrl && message && message.objectId) {
                 // Передаем cookie той же origin, чтобы backend мог прочитать PHP-сессию.
-                fetch(`${getObjectUrl}${encodeURIComponent(message.objectId)}`, {
-                    credentials: 'same-origin'
+                fetch(getObjectUrl, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        contextNonce: document.body.dataset.contextNonce || '',
+                        objectId: message.objectId
+                    })
                 })
                     .then(async response => {
                         const text = await response.text();

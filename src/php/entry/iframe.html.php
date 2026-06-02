@@ -1,3 +1,16 @@
+<?php
+/** @var string $accountId */
+/** @var bool $isAdmin */
+/** @var string $uid */
+/** @var string $fio */
+/** @var string $contextNonce */
+/** @var AppInstance $app */
+/** @var string|null $infoMessage */
+/** @var string|null $store */
+/** @var bool $isSettingsRequired */
+/** @var string[] $storesValues */
+/** @var string $appVersion */
+?>
 <!doctype html>
 <html lang="ru">
 <head>
@@ -180,6 +193,12 @@
             padding: var(--space-md) 20px 20px;
         }
 
+        .app-version {
+            margin: 0 0 10px;
+            font-size: var(--font-size-sm);
+            color: var(--muted);
+        }
+
         .info-list {
             margin: 0;
             padding-left: 18px;
@@ -210,6 +229,21 @@
         .status-ready {
             border-color: #4cae74;
             background: #e7f6ee;
+        }
+
+        .form-result {
+            min-height: 20px;
+            margin-top: var(--space-sm);
+            font-size: var(--font-size-sm);
+            color: var(--muted);
+        }
+
+        .form-result.is-success {
+            color: #246b44;
+        }
+
+        .form-result.is-error {
+            color: #9a2f2f;
         }
 
         .muted {
@@ -270,8 +304,9 @@
         </ul>
         <div class="panel-divider"></div>
         <h2>Состояние решения</h2>
-        <div class="status-box <?= $isSettingsRequired ? 'status-required' : 'status-ready' ?>">
-            <div class="status-title">
+        <p class="app-version">Версия <?= $appVersion ?></p>
+        <div id="appStatus" class="status-box <?= $isSettingsRequired ? 'status-required' : 'status-ready' ?>">
+            <div id="appStatusTitle" class="status-title">
                 <?= $isSettingsRequired ? 'ТРЕБУЕТСЯ НАСТРОЙКА' : 'РЕШЕНИЕ ГОТОВО К РАБОТЕ' ?>
             </div>
             <?php if (empty($app->accessToken)) { ?>
@@ -281,17 +316,19 @@
                 </p>
             <?php } ?>
             <?php if (!$isSettingsRequired) { ?>
-                <p>
+                <p id="appStatusDetails">
                     Сообщение: <?= escHtml($infoMessage) ?><br>
                     Выбран склад: <?= escHtml($store) ?>
                 </p>
+            <?php } else { ?>
+                <p id="appStatusDetails" hidden></p>
             <?php } ?>
         </div>
     </section>
     <section class="panel">
         <h2>Форма настроек</h2>
         <?php if ($isAdmin && !empty($app->accessToken)) { ?>
-            <form method="post" action="../utils/update-settings.php">
+            <form id="settingsForm" method="post" action="../utils/update-settings.php" data-update-url="../utils/update-settings.php">
                 <div class="row field-row">
                     <label for="infoMessage">Укажите сообщение</label>
                     <input id="infoMessage" type="text" name="infoMessage" value="<?= escHtml($infoMessage ?? '') ?>">
@@ -307,13 +344,102 @@
                         <?php } ?>
                     </select>
                 </div>
-                <input type="hidden" name="contextKey" value="<?= escHtml($contextKey) ?>"/>
+                <input type="hidden" name="contextNonce" value="<?= escHtml($contextNonce) ?>"/>
                 <button class="btn" type="submit">Сохранить</button>
+                <div id="settingsResult" class="form-result" role="status" aria-live="polite"></div>
             </form>
         <?php } elseif (!$isAdmin) { ?>
             <p class="muted">Настройки доступны только администратору аккаунта</p>
         <?php } ?>
     </section>
 </main>
+<script>
+    (function () {
+        const form = document.getElementById('settingsForm');
+        const result = document.getElementById('settingsResult');
+        const statusBox = document.getElementById('appStatus');
+        const statusTitle = document.getElementById('appStatusTitle');
+        const statusDetails = document.getElementById('appStatusDetails');
+
+        if (!form || !result) {
+            return;
+        }
+
+        const submitButton = form.querySelector('button[type="submit"]');
+        const defaultButtonText = submitButton ? submitButton.textContent : '';
+
+        const setResult = (message, kind) => {
+            result.textContent = message;
+            result.classList.remove('is-success', 'is-error');
+
+            if (kind) {
+                result.classList.add(kind);
+            }
+        };
+
+        const updateStatus = (status) => {
+            if (!status || !statusBox || !statusTitle || !statusDetails) {
+                return;
+            }
+
+            statusBox.classList.remove('status-required', 'status-ready');
+
+            if (status.className) {
+                statusBox.classList.add(status.className);
+            }
+
+            statusTitle.textContent = status.title || '';
+
+            if (status.showDetails) {
+                statusDetails.hidden = false;
+                statusDetails.innerHTML = '';
+                statusDetails.append(
+                    'Сообщение: ',
+                    status.infoMessage || '',
+                    document.createElement('br'),
+                    'Выбран склад: ',
+                    status.store || ''
+                );
+            } else {
+                statusDetails.hidden = true;
+                statusDetails.textContent = '';
+            }
+        };
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            setResult('', '');
+
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.textContent = 'Сохранение...';
+            }
+
+            try {
+                const response = await fetch(form.dataset.updateUrl || form.action, {
+                    method: 'POST',
+                    body: new FormData(form),
+                    credentials: 'same-origin',
+                });
+                const payload = await response.json();
+                const message = payload.message;
+
+                if (response.ok) {
+                    setResult(message || 'Настройки обновлены', 'is-success');
+                    updateStatus(payload.status);
+                } else {
+                    setResult(message || 'Не удалось сохранить настройки', 'is-error');
+                }
+            } catch (_error) {
+                setResult('Не удалось сохранить настройки', 'is-error');
+            } finally {
+                if (submitButton) {
+                    submitButton.disabled = false;
+                    submitButton.textContent = defaultButtonText;
+                }
+            }
+        });
+    })();
+</script>
 </body>
 </html>

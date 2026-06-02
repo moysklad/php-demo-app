@@ -2,7 +2,7 @@
 
 use \Firebase\JWT\JWT;
 
-require_once __DIR__ . '/jwt.lib.php';
+require_once __DIR__ . '/../../../vendor/autoload.php';
 
 // Конфигурация
 
@@ -14,9 +14,8 @@ class AppConfig
     public string $appBaseUrl = '';
     public string $databasePath = '';
     public string $encryptKey = '';
-
-    public string $moyskladVendorApiEndpointUrl = 'https://apps-api.moysklad.ru/api/vendor/1.0';
-    public string $moyskladJsonApiEndpointUrl = 'https://api.moysklad.ru/api/remap/1.2';
+    public string $moyskladVendorApiEndpointUrl = '';
+    public string $moyskladJsonApiEndpointUrl = '';
 
     public function __construct(array $cfg)
     {
@@ -47,6 +46,25 @@ function appDatabasePath(): string
 function cfg(): AppConfig
 {
     return $GLOBALS['cfg'];
+}
+
+function appVersion(): string
+{
+    static $version = null;
+
+    if ($version !== null) {
+        return $version;
+    }
+
+    $composerJson = dirname(__DIR__, 3) . '/composer.json';
+    if (!is_readable($composerJson)) {
+        return $version = 'dev';
+    }
+
+    $data = json_decode((string)file_get_contents($composerJson), true);
+    $version = (is_array($data) && !empty($data['version'])) ? (string)$data['version'] : 'dev';
+
+    return $version;
 }
 
 function escHtml($value): string
@@ -81,10 +99,10 @@ function checkIsAdmin($employee): bool
 }
 
 // Хранение пользовательского контекста в сессии.
-// DEMO: пример потока contextKey -> $_SESSION.
+// contextKey используется только для начальной загрузки entrypoint.
+// Дальше backend-запросы авторизуются через contextNonce из активной PHP-сессии.
 
 const USER_CONTEXT_SESSION_KEY = 'userContext';
-const USER_CONTEXT_STACK_LIMIT = 10;
 const USER_CONTEXT_SESSION_TTL_SECONDS = 7200;
 
 function ensureSessionStarted(): void
@@ -103,86 +121,96 @@ function ensureSessionStarted(): void
     session_start($sessionOptions);
 }
 
-function &userContextSessionBucket(): array
+function saveActiveUserContextToSession(array $context): array
 {
     ensureSessionStarted();
 
-    if (!isset($_SESSION[USER_CONTEXT_SESSION_KEY]) || !is_array($_SESSION[USER_CONTEXT_SESSION_KEY])) {
-        $_SESSION[USER_CONTEXT_SESSION_KEY] = [
-            'byContextKey' => [],
-            'contextKeyStack' => [],
-        ];
+    $previous = normalizeActiveUserContext($_SESSION[USER_CONTEXT_SESSION_KEY] ?? null);
+    $uid = trim((string)($context['uid'] ?? ''));
+    $accountId = trim((string)($context['accountId'] ?? ''));
+    $isAdmin = normalizeIsAdmin($context['isAdmin'] ?? false);
+
+    if ($uid === '' || $accountId === '') {
+        throw new InvalidArgumentException('User context requires uid and accountId');
     }
 
-    if (!isset($_SESSION[USER_CONTEXT_SESSION_KEY]['byContextKey']) || !is_array($_SESSION[USER_CONTEXT_SESSION_KEY]['byContextKey'])) {
-        $_SESSION[USER_CONTEXT_SESSION_KEY]['byContextKey'] = [];
+    $now = currentEpochMs();
+
+    if ($previous
+        && $previous['uid'] === $uid
+        && $previous['accountId'] === $accountId
+        && $previous['isAdmin'] === $isAdmin) {
+        $contextNonce = $previous['contextNonce'];
+        $createdAt = $previous['createdAt'];
+    } else {
+        $contextNonce = generateContextNonce();
+        $createdAt = $now;
     }
 
-    if (!isset($_SESSION[USER_CONTEXT_SESSION_KEY]['contextKeyStack']) || !is_array($_SESSION[USER_CONTEXT_SESSION_KEY]['contextKeyStack'])) {
-        $_SESSION[USER_CONTEXT_SESSION_KEY]['contextKeyStack'] = [];
-    }
+    $activeContext = [
+        'uid' => $uid,
+        'fio' => (string)($context['fio'] ?? ''),
+        'accountId' => $accountId,
+        'isAdmin' => $isAdmin,
+        'contextNonce' => $contextNonce,
+        'createdAt' => $createdAt,
+        'expiresAt' => $now + USER_CONTEXT_SESSION_TTL_SECONDS * 1000,
+    ];
 
-    trimUserContextBucket($_SESSION[USER_CONTEXT_SESSION_KEY]);
+    $_SESSION[USER_CONTEXT_SESSION_KEY] = $activeContext;
 
-    return $_SESSION[USER_CONTEXT_SESSION_KEY];
+    return $activeContext;
 }
 
-function saveUserContextToSession(string $contextKey, array $context): void
+function loadActiveUserContextFromSession(): ?array
 {
-    $bucket = &userContextSessionBucket();
+    ensureSessionStarted();
 
-    $context['contextKey'] = $contextKey;
+    $context = normalizeActiveUserContext($_SESSION[USER_CONTEXT_SESSION_KEY] ?? null);
 
-    $bucket['byContextKey'][$contextKey] = $context;
-
-    $updatedStack = [];
-
-    foreach ($bucket['contextKeyStack'] as $existingKey) {
-        if ($existingKey !== $contextKey) {
-            $updatedStack[] = $existingKey;
-        }
+    if ($context === null) {
+        unset($_SESSION[USER_CONTEXT_SESSION_KEY]);
     }
 
-    $updatedStack[] = $contextKey;
-    $bucket['contextKeyStack'] = $updatedStack;
-
-    trimUserContextBucket($bucket);
+    return $context;
 }
 
-function loadUserContextFromSession(string $contextKey): ?array
+function refreshActiveUserContextInSession(array $context): void
 {
-    $bucket = &userContextSessionBucket();
-    $context = $bucket['byContextKey'][$contextKey] ?? null;
+    ensureSessionStarted();
 
-    return is_array($context) ? $context : null;
+    $context['expiresAt'] = currentEpochMs() + USER_CONTEXT_SESSION_TTL_SECONDS * 1000;
+    $_SESSION[USER_CONTEXT_SESSION_KEY] = $context;
 }
 
-function getContextKeyFromRequest(): ?string
+function getContextNonceFromRequest(): ?string
 {
-    $contextKey = $_POST['contextKey'] ?? $_GET['contextKey'] ?? null;
+    $contextNonce = requestBodyValue('contextNonce');
 
-    if ($contextKey === null) {
+    if ($contextNonce === null) {
         return null;
     }
 
-    $contextKey = trim((string)$contextKey);
+    $contextNonce = trim($contextNonce);
 
-    return $contextKey === '' ? null : $contextKey;
+    return $contextNonce === '' ? null : $contextNonce;
 }
 
 function resolveBackendContextFromSession(): ?array
 {
-    $contextKey = getContextKeyFromRequest();
+    $contextNonce = getContextNonceFromRequest();
 
-    if ($contextKey === null) {
+    if ($contextNonce === null) {
         return null;
     }
 
-    $context = loadUserContextFromSession($contextKey);
+    $context = loadActiveUserContextFromSession();
 
-    if (!is_array($context)) {
+    if (!is_array($context) || $context['contextNonce'] !== $contextNonce) {
         return null;
     }
+
+    refreshActiveUserContextInSession($context);
 
     $accountId = trim((string)($context['accountId'] ?? ''));
     $uid = trim((string)($context['uid'] ?? ''));
@@ -198,56 +226,123 @@ function resolveBackendContextFromSession(): ?array
     ];
 }
 
-function trimUserContextBucket(array &$bucket): void
+function requestBodyValue(string $name): ?string
 {
-    $contexts = $bucket['byContextKey'] ?? [];
-    $rawStack = $bucket['contextKeyStack'] ?? [];
+    if (array_key_exists($name, $_POST)) {
+        $value = scalarRequestValue($_POST[$name]);
 
-    if (!is_array($contexts)) {
-        $contexts = [];
-    }
-
-    if (!is_array($rawStack)) {
-        $rawStack = [];
-    }
-
-    $stack = [];
-    $seen = [];
-
-    foreach ($rawStack as $contextKey) {
-        if (!is_string($contextKey) || $contextKey === '' || !array_key_exists($contextKey, $contexts) || isset($seen[$contextKey])) {
-            continue;
-        }
-
-        $seen[$contextKey] = true;
-        $stack[] = $contextKey;
-    }
-
-    foreach ($contexts as $contextKey => $_context) {
-        if (!is_string($contextKey) || $contextKey === '') {
-            continue;
-        }
-
-        if (!isset($seen[$contextKey])) {
-            $seen[$contextKey] = true;
-            $stack[] = $contextKey;
+        if ($value !== null) {
+            return $value;
         }
     }
 
-    if (count($stack) > USER_CONTEXT_STACK_LIMIT) {
-        $stack = array_slice($stack, -USER_CONTEXT_STACK_LIMIT);
+    $jsonBody = requestJsonBody();
+
+    if (array_key_exists($name, $jsonBody)) {
+        return scalarRequestValue($jsonBody[$name]);
     }
 
-    $validKeys = array_flip($stack);
+    return null;
+}
 
-    foreach (array_keys($contexts) as $contextKey) {
-        if (!isset($validKeys[$contextKey])) {
-            unset($contexts[$contextKey]);
-        }
+function requestJsonBody(): array
+{
+    // php://input читаем и декодируем один раз на запрос: contextNonce и objectId могут понадобиться разным helper-ам.
+    static $jsonBody = null;
+
+    if ($jsonBody !== null) {
+        return $jsonBody;
     }
 
-    $bucket['byContextKey'] = $contexts;
-    $bucket['contextKeyStack'] = $stack;
+    $jsonBody = [];
+    $contentType = (string)($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? '');
+
+    if (!isJsonContentType($contentType)) {
+        return $jsonBody;
+    }
+
+    $rawBody = file_get_contents('php://input');
+
+    if ($rawBody === false || trim($rawBody) === '') {
+        return $jsonBody;
+    }
+
+    $decoded = json_decode((string)$rawBody, true);
+
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        log_message('WARN', 'Failed to decode JSON request body: ' . json_last_error_msg());
+
+        return $jsonBody;
+    }
+
+    if (!is_array($decoded) || array_is_list($decoded)) {
+        log_message('WARN', 'JSON request body must be an object');
+
+        return $jsonBody;
+    }
+
+    $jsonBody = $decoded;
+
+    return $jsonBody;
+}
+
+function isJsonContentType(string $contentType): bool
+{
+    $mediaType = strtolower(trim(explode(';', $contentType, 2)[0]));
+
+    return $mediaType === 'application/json';
+}
+
+function scalarRequestValue(mixed $value): ?string
+{
+    if (is_array($value) || is_object($value) || $value === null) {
+        return null;
+    }
+
+    return trim((string)$value);
+}
+
+function normalizeActiveUserContext(mixed $value): ?array
+{
+    if (!is_array($value)) {
+        return null;
+    }
+
+    $accountId = trim((string)($value['accountId'] ?? ''));
+    $uid = trim((string)($value['uid'] ?? ''));
+    $contextNonce = trim((string)($value['contextNonce'] ?? ''));
+
+    if ($accountId === '' || $uid === '' || $contextNonce === '') {
+        return null;
+    }
+
+    $now = currentEpochMs();
+    $createdAt = is_int($value['createdAt'] ?? null) ? $value['createdAt'] : $now;
+    $expiresAt = is_int($value['expiresAt'] ?? null) ? $value['expiresAt'] : $createdAt + USER_CONTEXT_SESSION_TTL_SECONDS * 1000;
+
+    if ($expiresAt <= $now) {
+        return null;
+    }
+
+    return [
+        'uid' => $uid,
+        'fio' => (string)($value['fio'] ?? ''),
+        'accountId' => $accountId,
+        'isAdmin' => normalizeIsAdmin($value['isAdmin'] ?? false),
+        'contextNonce' => $contextNonce,
+        'createdAt' => $createdAt,
+        'expiresAt' => $expiresAt,
+    ];
+}
+
+function generateContextNonce(): string
+{
+    return rtrim(strtr(base64_encode(random_bytes(16)), '+/', '-_'), '=');
+}
+
+function currentEpochMs(): int
+{
+    return (int)floor(microtime(true) * 1000);
 }
 
 // Vendor API 1.0
@@ -328,10 +423,12 @@ function makeHttpRequest(string $method, string $url, string $bearerToken, mixed
 
     if ($statusCode >= 400) {
         log_message('WARN', "HTTP $statusCode for $method $url");
+
+        return null;
     }
 
     if ($body === '') {
-        return null;
+        return $statusCode >= 200 && $statusCode < 300;
     }
 
     $decoded = json_decode($body);
@@ -361,7 +458,7 @@ function buildJWT(): string
         'jti' => bin2hex(random_bytes(32)),
     ];
 
-    return JWT::encode($token, cfg()->secretKey);
+    return JWT::encode($token, cfg()->secretKey, 'HS256');
 }
 
 // JSON API 1.2
@@ -419,6 +516,7 @@ const LOG_LEVELS = [
 function log_message(string $level, string $message): void
 {
     if (LOG_LEVELS[$level] >= LOG_LEVELS[LOG_LEVEL]) {
+        $message = redactSensitiveLogMessage($message);
         $log_entry = sprintf(
             "[%s][%s] %s\n",
             date('Y-m-d H:i:s'),
@@ -429,6 +527,26 @@ function log_message(string $level, string $message): void
         // Пишем логи в stderr для Docker.
         file_put_contents('php://stderr', $log_entry, FILE_APPEND);
     }
+}
+
+function redactSensitiveLogMessage(string $message): string
+{
+    $redacted = preg_replace('~(?i)((?:contextKey|contextNonce)=)([^&\s]+)~', '$1<redacted>', $message);
+    if ($redacted !== null) {
+        $message = $redacted;
+    }
+
+    $redacted = preg_replace('~(?i)(Authorization:\s*Bearer\s+)[^\s]+~', '$1<redacted>', $message);
+    if ($redacted !== null) {
+        $message = $redacted;
+    }
+
+    $redacted = preg_replace('~(/context/)[^/?#\s]+~', '$1<redacted>', $message);
+    if ($redacted !== null) {
+        $message = $redacted;
+    }
+
+    return $message;
 }
 
 // Состояние AppInstance
