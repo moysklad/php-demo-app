@@ -182,3 +182,43 @@ Cookie сессии настроены в HTTPS-only режиме: `SameSite=Non
 Когда завершается сессия:
 - Исходное время жизни сессии (TTL) равно 2 часам.
 - TTL скользящий: пока iframe/виджет делает backend-запросы, сессия продлевается. Если пользователь не совершает никаких действий в течение TTL, то сессия завершается.
+
+## Создание черновика решения в личном кабинете
+
+Перейдите в личный кабинет в раздел Решения https://apps.moysklad.ru/cabinet/application
+
+Нажмите кнопку `Создать решение` и заполните необходимые поля. В качестве дескриптора можно использовать заглушку вида:
+
+```xml
+<ServerApplication xsi:schemaLocation="https://apps-api.moysklad.ru/xml/ns/appstore/app/v2 https://apps-api.moysklad.ru/xml/ns/appstore/app/v2/application-v2.xsd" xmlns="https://apps-api.moysklad.ru/xml/ns/appstore/app/v2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+    <access>
+        <resource>https://online.moysklad.ru/api/remap/1.2</resource>
+        <scope>admin</scope>
+    </access>
+    <vendorApi>
+        <endpointBase>https://example.com/vendor</endpointBase>
+    </vendorApi>
+</ServerApplication>
+```
+
+Сохраните черновик и скопируйте значения `APP_ID`, `APP_UID`, `APP_SECRET_KEY` с вкладки Учетные данные в .env файл.
+
+## Отладка черновика через cloudflared
+
+Скачайте и установите последнюю версию клиента https://github.com/cloudflare/cloudflared
+
+Создайте Quick Tunnel, выполнив в отдельном терминале
+
+```bash
+cloudflared tunnel --protocol http2 --edge-ip-version 4 --url http://localhost:8085
+```
+
+Сохраните выданный временный адрес в переменной `APP_BASE_URL` в .env файле. Пример:
+
+```
+APP_BASE_URL=https://gateway-mazda-titled-easy.trycloudflare.com 
+```
+
+Сгенерируйте дескриптор через `generate-descriptor.php` и сохраните его в личном кабинете в карточке черновика.
+
+После этого можно устанавливать и отлаживать решение в каталоге МоегоСклада, перейдя по адресу `https://online.moysklad.ru/app/#apps?id=<APP_ID>`.
