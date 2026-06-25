@@ -260,7 +260,7 @@
         }
     </style>
     <script type="text/javascript"
-            src="https://cdn.jsdelivr.net/npm/@moysklad-official/js-widget-sdk@1/dist/widget.min.js"></script>
+            src="https://cdn.jsdelivr.net/npm/@moysklad/js-widget-sdk@1.1.0/dist/widget.min.js"></script>
 </head>
 <body data-context-nonce="<?= escHtml($contextNonce) ?>">
 <main>
