@@ -290,7 +290,7 @@
         }
     </style>
     <script type="text/javascript"
-            src="https://apps-api.moysklad.ru/js/ns/appstore/app/v1/moysklad-iframe-expand-3.js"></script>
+            src="https://cdn.jsdelivr.net/npm/@moysklad/js-widget-sdk@1.1.0/dist/widget.min.js"></script>
 </head>
 <body>
 <main class="iframe-layout">
@@ -355,6 +355,14 @@
 </main>
 <script>
     (function () {
+        const sdkNamespace = window.WidgetSDK;
+        const sdk = sdkNamespace ? sdkNamespace.create({debug: true}) : null;
+
+        if (sdk) {
+            window.widgetSdk = sdk;
+            sdk.autoResizeIframe();
+        }
+
         const form = document.getElementById('settingsForm');
         const result = document.getElementById('settingsResult');
         const statusBox = document.getElementById('appStatus');
