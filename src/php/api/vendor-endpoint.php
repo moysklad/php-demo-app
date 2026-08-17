@@ -59,7 +59,16 @@ switch ($method) {
             $app->accessToken = (string)$data->access[0]->access_token;
         }
 
-        if ($cause === 'Resume') {
+        if ($cause === 'Install') {
+            // Настройки предыдущей установки сохраняются при удалении решения, поэтому при повторной
+            // установке решение сразу готово к работе и пользователю не нужно настраивать его заново
+            if ($hasRequiredSettings) {
+                log_message('INFO', "Settings restored for appId=$appId on accountId=$accountId");
+            }
+
+            $app->status = $hasRequiredSettings ? AppInstance::ACTIVATED : AppInstance::SETTINGS_REQUIRED;
+        } elseif ($cause === 'Resume') {
+            // Приостановка временная: настройки не удалялись, решение продолжает работу с прежней конфигурацией
             $app->status = $hasRequiredSettings ? AppInstance::ACTIVATED : AppInstance::SETTINGS_REQUIRED;
         } elseif (in_array($cause, ['TariffChanged', 'Autoprolongation'], true)) {
             // Смена тарифа не требует обновления — tariffId в БД не хранится, статус уже Activated
@@ -121,8 +130,11 @@ switch ($method) {
 
         switch ($cause) {
             case 'Uninstall':
-                $app->delete();
-                log_message('INFO', "App appId=$appId deleted on accountId=$accountId, cause=$cause");
+                // Решение удалено с аккаунта. Пользовательские настройки сохраняем, чтобы при повторной
+                // установке не заставлять пользователя настраивать решение заново. Если политика хранения
+                // данных требует обратного, вызовите здесь $app->delete()
+                $app->uninstall();
+                log_message('INFO', "App appId=$appId uninstalled on accountId=$accountId, settings kept, cause=$cause");
 
                 break;
             case 'Suspend':
