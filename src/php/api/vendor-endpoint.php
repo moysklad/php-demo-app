@@ -53,6 +53,7 @@ switch ($method) {
 
         $cause = (string)($data->cause ?? '');
         $hasRequiredSettings = trim($app->store ?? '') !== '';
+        $settingsRestored = false;
 
         // cause=Install и cause=Resume содержат access token; cause=TariffChanged и Autoprolongation — нет
         if (!empty($data->access[0]->access_token)) {
@@ -62,9 +63,7 @@ switch ($method) {
         if ($cause === 'Install') {
             // Настройки предыдущей установки сохраняются при удалении решения, поэтому при повторной
             // установке решение сразу готово к работе и пользователю не нужно настраивать его заново
-            if ($hasRequiredSettings) {
-                log_message('INFO', "Settings restored for appId=$appId on accountId=$accountId");
-            }
+            $settingsRestored = $hasRequiredSettings;
 
             $app->status = $hasRequiredSettings ? AppInstance::ACTIVATED : AppInstance::SETTINGS_REQUIRED;
         } elseif ($cause === 'Resume') {
@@ -78,7 +77,7 @@ switch ($method) {
 
         $app->persist();
 
-        replyStatus($appId, $accountId, $app->getStatusName());
+        replyStatus($appId, $accountId, $app->getStatusName(), $settingsRestored);
 
         break;
     case 'POST':
@@ -160,9 +159,11 @@ function checkAppStatus(string $appId, string $accountId, ?string $status): void
     }
 }
 
-function replyStatus(string $appId, string $accountId, ?string $status): void
+function replyStatus(string $appId, string $accountId, ?string $status, bool $settingsRestored = false): void
 {
-    log_message('INFO', "App appId=$appId installed on accountId=$accountId. Status: " . $status);
+    $restoredNote = $settingsRestored ? ' with restored settings' : '';
+
+    log_message('INFO', "App appId=$appId installed on accountId=$accountId$restoredNote. Status: " . $status);
     header("Content-Type: application/json");
 
     echo json_encode(['status' => $status]);
