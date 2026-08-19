@@ -53,13 +53,21 @@ switch ($method) {
 
         $cause = (string)($data->cause ?? '');
         $hasRequiredSettings = trim($app->store ?? '') !== '';
+        $settingsRestored = false;
 
         // cause=Install и cause=Resume содержат access token; cause=TariffChanged и Autoprolongation — нет
         if (!empty($data->access[0]->access_token)) {
             $app->accessToken = (string)$data->access[0]->access_token;
         }
 
-        if ($cause === 'Resume') {
+        if ($cause === 'Install') {
+            // Настройки предыдущей установки сохраняются при удалении решения, поэтому при повторной
+            // установке решение сразу готово к работе и пользователю не нужно настраивать его заново
+            $settingsRestored = $hasRequiredSettings;
+
+            $app->status = $hasRequiredSettings ? AppInstance::ACTIVATED : AppInstance::SETTINGS_REQUIRED;
+        } elseif ($cause === 'Resume') {
+            // Приостановка временная: настройки не удалялись, решение продолжает работу с прежней конфигурацией
             $app->status = $hasRequiredSettings ? AppInstance::ACTIVATED : AppInstance::SETTINGS_REQUIRED;
         } elseif (in_array($cause, ['TariffChanged', 'Autoprolongation'], true)) {
             // Смена тарифа не требует обновления — tariffId в БД не хранится, статус уже Activated
@@ -69,7 +77,7 @@ switch ($method) {
 
         $app->persist();
 
-        replyStatus($appId, $accountId, $app->getStatusName());
+        replyStatus($appId, $accountId, $app->getStatusName(), $settingsRestored);
 
         break;
     case 'POST':
@@ -121,8 +129,11 @@ switch ($method) {
 
         switch ($cause) {
             case 'Uninstall':
-                $app->delete();
-                log_message('INFO', "App appId=$appId deleted on accountId=$accountId, cause=$cause");
+                // Решение удалено с аккаунта. Пользовательские настройки сохраняем, чтобы при повторной
+                // установке не заставлять пользователя настраивать решение заново. Если политика хранения
+                // данных требует обратного, вызовите здесь $app->delete()
+                $app->uninstall();
+                log_message('INFO', "App appId=$appId uninstalled on accountId=$accountId, settings kept, cause=$cause");
 
                 break;
             case 'Suspend':
@@ -148,9 +159,11 @@ function checkAppStatus(string $appId, string $accountId, ?string $status): void
     }
 }
 
-function replyStatus(string $appId, string $accountId, ?string $status): void
+function replyStatus(string $appId, string $accountId, ?string $status, bool $settingsRestored = false): void
 {
-    log_message('INFO', "App appId=$appId installed on accountId=$accountId. Status: " . $status);
+    $restoredNote = $settingsRestored ? ' with restored settings' : '';
+
+    log_message('INFO', "App appId=$appId installed on accountId=$accountId$restoredNote. Status: " . $status);
     header("Content-Type: application/json");
 
     echo json_encode(['status' => $status]);

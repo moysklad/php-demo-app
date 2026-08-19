@@ -559,6 +559,8 @@ class AppInstance
     const UNKNOWN = 0;
     const SETTINGS_REQUIRED = 1;
     const SUSPENDED = 2;
+    // Решение удалено с аккаунта, но настройки сохранены для возможной повторной установки
+    const UNINSTALLED = 4;
     const ACTIVATED = 100;
 
     public string $appId;
@@ -601,15 +603,23 @@ class AppInstance
         appInstanceRepository()->persist($this);
     }
 
+    // Полностью удаляет установку вместе с настройками. Использовать вместо uninstall(),
+    // если политика хранения данных требует удалять настройки при отключении решения от аккаунта.
     function delete(): void
     {
         appInstanceRepository()->delete($this->appId, $this->accountId);
     }
 
-    // Деактивирует решение, сохраняя настройки. Использовать при получении DELETE от Vendor API.
+    // Помечает установку удаленной, сохраняя настройки. Использовать при получении DELETE с причиной Uninstall.
+    function uninstall(): void
+    {
+        appInstanceRepository()->deactivate($this->appId, $this->accountId, self::UNINSTALLED);
+    }
+
+    // Деактивирует решение, сохраняя настройки. Использовать при получении DELETE с причиной Suspend.
     function suspend(): void
     {
-        appInstanceRepository()->deactivate($this->appId, $this->accountId);
+        appInstanceRepository()->deactivate($this->appId, $this->accountId, self::SUSPENDED);
     }
 
     static function loadApp(string $accountId): AppInstance

@@ -89,7 +89,9 @@ class AppInstanceSqliteRepository extends SqliteRepository
         ]);
     }
 
-    public function deactivate(string $appId, string $accountId): void
+    // Деактивирует установку, сохраняя пользовательские настройки: приостановка ($status = SUSPENDED)
+    // и удаление с аккаунта ($status = UNINSTALLED) отличаются только итоговым статусом установки.
+    public function deactivate(string $appId, string $accountId, int $status = AppInstance::SUSPENDED): void
     {
         $stmt = $this->connection()->prepare(
             'UPDATE account_application
@@ -100,7 +102,7 @@ class AppInstanceSqliteRepository extends SqliteRepository
         );
 
         $stmt->execute([
-            ':status' => AppInstance::SUSPENDED,
+            ':status' => $status,
             ':application_id' => $appId,
             ':account_id' => $accountId,
             ':updated_at' => gmdate('c'),
@@ -114,7 +116,7 @@ class AppInstanceSqliteRepository extends SqliteRepository
             'CREATE TABLE IF NOT EXISTS account_application (
                 account_id TEXT NOT NULL,
                 application_id TEXT NOT NULL,
-                status INTEGER, -- 0=UNKNOWN, 1=SETTINGS_REQUIRED, 2=SUSPENDED, 100=ACTIVATED
+                status INTEGER, -- 0=UNKNOWN, 1=SETTINGS_REQUIRED, 2=SUSPENDED, 4=UNINSTALLED, 100=ACTIVATED
                 access_token TEXT,
                 info_message TEXT,
                 store TEXT,
