@@ -1,15 +1,6 @@
 <?php
-/** @var string $accountId */
-/** @var bool $isAdmin */
-/** @var string $uid */
-/** @var string $fio */
-/** @var string $contextNonce */
-/** @var AppInstance $app */
-/** @var string|null $infoMessage */
-/** @var string|null $store */
-/** @var bool $isSettingsRequired */
-/** @var string[] $storesValues */
-/** @var string $appVersion */
+// Оболочка основного iframe: персональные данные и форма настроек появляются после
+// обмена одноразового токена в entry/user-context.php.
 ?>
 <!doctype html>
 <html lang="ru">
@@ -242,7 +233,8 @@
             color: #246b44;
         }
 
-        .form-result.is-error {
+        .form-result.is-error,
+        #bootstrapStatus.is-error {
             color: #9a2f2f;
         }
 
@@ -290,67 +282,49 @@
         }
     </style>
     <script type="text/javascript"
-            src="https://cdn.jsdelivr.net/npm/@moysklad/js-widget-sdk@1.1.0/dist/widget.min.js"></script>
+            src="https://cdn.jsdelivr.net/npm/@moysklad/js-widget-sdk@1.3.0/dist/widget.min.js"></script>
 </head>
 <body>
 <main class="iframe-layout">
-    <section class="panel">
+    <section id="bootstrapPanel" class="panel">
+        <h2>Контекст пользователя</h2>
+        <p id="bootstrapStatus" class="muted" role="status" aria-live="polite">Получаем контекст пользователя…</p>
+    </section>
+    <section id="userPanel" class="panel" hidden>
         <h2>Информация о пользователе</h2>
         <ul class="info-list">
-            <li>Текущий пользователь: <?= escHtml($uid) ?> (<?= escHtml($fio) ?>)</li>
-            <li>Идентификатор аккаунта: <?= escHtml($accountId) ?></li>
-            <li>Уровень доступа: <b><?= $isAdmin ? 'администратор аккаунта' : 'простой пользователь' ?></b>
-            </li>
+            <li>Текущий пользователь: <span id="userUid"></span></li>
+            <li>Идентификатор аккаунта: <span id="userAccountId"></span></li>
+            <li>Уровень доступа: <b id="userAccessLevel"></b></li>
         </ul>
         <div class="panel-divider"></div>
         <h2>Состояние решения</h2>
-        <p class="app-version">Версия <?= $appVersion ?></p>
-        <div id="appStatus" class="status-box <?= $isSettingsRequired ? 'status-required' : 'status-ready' ?>">
-            <div id="appStatusTitle" class="status-title">
-                <?= $isSettingsRequired ? 'ТРЕБУЕТСЯ НАСТРОЙКА' : 'РЕШЕНИЕ ГОТОВО К РАБОТЕ' ?>
-            </div>
-            <?php if (empty($app->accessToken)) { ?>
-                <p>
-                    В локальном хранилище нет `access_token` для этого приложения.
-                    После пересборки контейнера переустановите приложение, чтобы заново получить install callback.
-                </p>
-            <?php } ?>
-            <?php if (!$isSettingsRequired) { ?>
-                <p id="appStatusDetails">
-                    Сообщение: <?= escHtml($infoMessage) ?><br>
-                    Выбран склад: <?= escHtml($store) ?>
-                </p>
-            <?php } else { ?>
-                <p id="appStatusDetails" hidden></p>
-            <?php } ?>
+        <p class="app-version">Версия <span id="appVersion"></span></p>
+        <div id="appStatus" class="status-box">
+            <div id="appStatusTitle" class="status-title"></div>
+            <p id="noAccessToken" hidden>
+                В локальном хранилище нет `access_token` для этого приложения.
+                После пересборки контейнера переустановите приложение, чтобы заново получить install callback.
+            </p>
+            <p id="appStatusDetails" hidden></p>
         </div>
     </section>
-    <section class="panel">
+    <section id="settingsPanel" class="panel" hidden>
         <h2>Форма настроек</h2>
-        <?php if ($isAdmin && !empty($app->accessToken)) { ?>
-            <form id="settingsForm" method="post" action="../utils/update-settings.php" data-update-url="../utils/update-settings.php">
-                <div class="row field-row">
-                    <label for="infoMessage">Укажите сообщение</label>
-                    <input id="infoMessage" type="text" name="infoMessage" value="<?= escHtml($infoMessage ?? '') ?>">
-                </div>
-                <div class="row field-row">
-                    <label for="store">Выберите склад</label>
-                    <select id="store" name="store">
-                        <?php if (!empty($store) && !in_array($store, $storesValues, true)) { ?>
-                            <option value="<?= escHtml($store) ?>" selected><?= escHtml($store) ?></option>
-                        <?php } ?>
-                        <?php foreach ($storesValues as $v) { ?>
-                            <option value="<?= escHtml($v) ?>" <?= $v === $store ? 'selected' : '' ?>><?= escHtml($v) ?></option>
-                        <?php } ?>
-                    </select>
-                </div>
-                <input type="hidden" name="contextNonce" value="<?= escHtml($contextNonce) ?>"/>
-                <button class="btn" type="submit">Сохранить</button>
-                <div id="settingsResult" class="form-result" role="status" aria-live="polite"></div>
-            </form>
-        <?php } elseif (!$isAdmin) { ?>
-            <p class="muted">Настройки доступны только администратору аккаунта</p>
-        <?php } ?>
+        <form id="settingsForm" method="post" action="../utils/update-settings.php" data-update-url="../utils/update-settings.php" hidden>
+            <div class="row field-row">
+                <label for="infoMessage">Укажите сообщение</label>
+                <input id="infoMessage" type="text" name="infoMessage" value="">
+            </div>
+            <div class="row field-row">
+                <label for="store">Выберите склад</label>
+                <select id="store" name="store"></select>
+            </div>
+            <input type="hidden" name="contextNonce" value=""/>
+            <button class="btn" type="submit">Сохранить</button>
+            <div id="settingsResult" class="form-result" role="status" aria-live="polite"></div>
+        </form>
+        <p id="settingsRestricted" class="muted" hidden>Настройки доступны только администратору аккаунта</p>
     </section>
 </main>
 <script>
@@ -363,6 +337,11 @@
             sdk.autoResizeIframe();
         }
 
+        const bootstrapPanel = document.getElementById('bootstrapPanel');
+        const bootstrapStatus = document.getElementById('bootstrapStatus');
+        const userPanel = document.getElementById('userPanel');
+        const settingsPanel = document.getElementById('settingsPanel');
+        const settingsRestricted = document.getElementById('settingsRestricted');
         const form = document.getElementById('settingsForm');
         const result = document.getElementById('settingsResult');
         const statusBox = document.getElementById('appStatus');
@@ -375,6 +354,93 @@
 
         const submitButton = form.querySelector('button[type="submit"]');
         const defaultButtonText = submitButton ? submitButton.textContent : '';
+
+        const showBootstrapError = (message) => {
+            bootstrapStatus.textContent = message;
+            bootstrapStatus.classList.remove('muted');
+            bootstrapStatus.classList.add('is-error');
+        };
+
+        const initializeUserContext = async () => {
+            if (!sdk || typeof sdk.requestUserContextToken !== 'function') {
+                showBootstrapError('JS Widget SDK не загружен, контекст пользователя недоступен.');
+                return;
+            }
+
+            let token = null;
+
+            try {
+                token = await sdk.requestUserContextToken();
+            } catch (error) {
+                const details = error && error.message ? error.message : String(error);
+                showBootstrapError(`Не удалось запросить контекст пользователя у хоста: ${details}`);
+                return;
+            }
+
+            const request = new Request('user-context.php', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({token, page: 'iframe'}),
+                credentials: 'same-origin',
+            });
+            token = null;
+
+            let response;
+            let payload = null;
+
+            try {
+                response = await fetch(request);
+                payload = await response.json().catch(() => null);
+            } catch (_error) {
+                showBootstrapError('Не удалось отправить контекст на сервер приложения.');
+                return;
+            }
+
+            if (!response.ok || !payload || !payload.pageData) {
+                const code = payload && payload.code ? ` (код ${payload.code})` : '';
+                showBootstrapError(`Не удалось получить контекст пользователя: HTTP ${response.status}${code}.`);
+                return;
+            }
+
+            renderPage(payload.pageData);
+        };
+
+        const renderPage = (pageData) => {
+            document.getElementById('userUid').textContent = pageData.fio ? `${pageData.uid} (${pageData.fio})` : pageData.uid;
+            document.getElementById('userAccountId').textContent = pageData.accountId;
+            document.getElementById('userAccessLevel').textContent = pageData.accessLevel;
+            document.getElementById('appVersion').textContent = pageData.appVersion || '';
+            document.getElementById('noAccessToken').hidden = pageData.hasAccessToken;
+            updateStatus(pageData.status);
+
+            if (pageData.isAdmin && pageData.hasAccessToken) {
+                const storeSelect = document.getElementById('store');
+                const currentStore = pageData.status ? pageData.status.store : '';
+                const stores = Array.isArray(pageData.storesValues) ? pageData.storesValues.slice() : [];
+
+                if (currentStore && !stores.includes(currentStore)) {
+                    stores.unshift(currentStore);
+                }
+
+                storeSelect.innerHTML = '';
+                stores.forEach((value) => {
+                    const option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = value;
+                    option.selected = value === currentStore;
+                    storeSelect.append(option);
+                });
+                document.getElementById('infoMessage').value = pageData.status ? pageData.status.infoMessage : '';
+                form.elements.namedItem('contextNonce').value = pageData.contextNonce;
+                form.hidden = false;
+            } else if (!pageData.isAdmin) {
+                settingsRestricted.hidden = false;
+            }
+
+            bootstrapPanel.hidden = true;
+            userPanel.hidden = false;
+            settingsPanel.hidden = false;
+        };
 
         const setResult = (message, kind) => {
             result.textContent = message;
@@ -447,6 +513,8 @@
                 }
             }
         });
+
+        initializeUserContext();
     })();
 </script>
 </body>
