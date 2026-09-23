@@ -1,8 +1,5 @@
 <?php
-/** @var string $uid */
-/** @var string $fio */
 /** @var string $getObjectUrl */
-/** @var string $contextNonce */
 ?>
 <!doctype html>
 <html lang="ru">
@@ -260,15 +257,15 @@
         }
     </style>
     <script type="text/javascript"
-            src="https://cdn.jsdelivr.net/npm/@moysklad/js-widget-sdk@1.1.0/dist/widget.min.js"></script>
+            src="https://cdn.jsdelivr.net/npm/@moysklad/js-widget-sdk@1.3.0/dist/widget.min.js"></script>
 </head>
-<body data-context-nonce="<?= escHtml($contextNonce) ?>">
+<body>
 <main>
     <section class="panel settings">
         <h2 title="Информацию о текущем пользователе виджет может получить на своем бэкенде через Vendor API">
             Текущий пользователь <span class="hint">(?)</span>
         </h2>
-        <div><?= escHtml($uid) ?> (<?= escHtml($fio) ?>)</div>
+        <div id="user" role="status" aria-live="polite">Получаем контекст пользователя…</div>
         <div class="panel-divider"></div>
         <h2 title="Используя objectId, переданный в сообщении Open, можем получить через JSON API открытую пользователем сущность/документ">
             Открытый объект <span class="hint">(?)</span>
@@ -505,6 +502,95 @@
         widgetLog('SDK initialized', {debug: true});
         setSdkControlsEnabled(true);
 
+        const userEl = document.getElementById('user');
+        let contextNonce = '';
+        let pendingObjectId = null;
+
+        // Open может прийти раньше, чем сессия поднимется, поэтому objectId ждет контекст.
+        const initializeUserContext = async () => {
+            let token = null;
+
+            try {
+                token = await sdk.requestUserContextToken();
+            } catch (error) {
+                widgetLog('requestUserContextToken error', {message: error.message || String(error), name: error.name});
+                userEl.textContent = 'Контекст пользователя недоступен';
+                return;
+            }
+
+            const request = new Request('user-context.php', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({token}),
+                credentials: 'same-origin',
+            });
+            token = null;
+
+            try {
+                const response = await fetch(request);
+                const payload = await response.json().catch(() => null);
+
+                if (!response.ok || !payload || !payload.user) {
+                    widgetLog('user context exchange failed', {status: response.status, code: payload && payload.code});
+                    userEl.textContent = 'Контекст пользователя недоступен';
+                    return;
+                }
+
+                contextNonce = payload.contextNonce || '';
+                userEl.textContent = `${payload.user.userUid} (${payload.user.role})`;
+                widgetLog('user context ready', payload.user);
+
+                if (pendingObjectId) {
+                    const objectId = pendingObjectId;
+                    pendingObjectId = null;
+                    loadObject(objectId);
+                }
+            } catch (error) {
+                widgetLog('user context exchange error', {message: error.message || String(error)});
+                userEl.textContent = 'Контекст пользователя недоступен';
+            }
+        };
+
+        const loadObject = (objectId) => {
+            if (!objectEl || !getObjectUrl) {
+                return;
+            }
+
+            if (!contextNonce) {
+                pendingObjectId = objectId;
+                widgetLog('object fetch deferred', {reason: 'waiting for user context'});
+                return;
+            }
+
+            // Передаем cookie той же origin, чтобы backend мог прочитать PHP-сессию.
+            fetch(getObjectUrl, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    contextNonce,
+                    objectId
+                })
+            })
+                .then(async response => {
+                    const text = await response.text();
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${text}`);
+                    }
+
+                    return text;
+                })
+                .then(text => {
+                    objectEl.textContent = text;
+                })
+                .catch(error => {
+                    widgetLog('object fetch error', {message: error.message || String(error)});
+                });
+        };
+
         // Автоматически отправляем openFeedback после события Open.
         const maybeAutoOpenFeedback = (openMessage) => {
             const resolvedId = openMessage?.messageId;
@@ -520,35 +606,9 @@
             widgetLog('Event: Open', message);
             maybeAutoOpenFeedback(message);
 
-            if (objectEl && getObjectUrl && message && message.objectId) {
-                // Передаем cookie той же origin, чтобы backend мог прочитать PHP-сессию.
-                fetch(getObjectUrl, {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        contextNonce: document.body.dataset.contextNonce || '',
-                        objectId: message.objectId
-                    })
-                })
-                    .then(async response => {
-                        const text = await response.text();
-
-                        if (!response.ok) {
-                            throw new Error(`HTTP ${response.status}: ${text}`);
-                        }
-
-                        return text;
-                    })
-                    .then(text => {
-                        objectEl.textContent = text;
-                    })
-                    .catch(error => {
-                        widgetLog('object fetch error', {message: error.message || String(error)});
-                    });
-            } else if (!message || !message.objectId) {
+            if (message && message.objectId) {
+                loadObject(message.objectId);
+            } else {
                 widgetLog('object fetch skipped', {reason: 'missing objectId'});
             }
         });
@@ -681,6 +741,8 @@
 
             widgetLog('closePopup sent', res);
         });
+
+        initializeUserContext();
     }
 </script>
 </body>

@@ -85,21 +85,20 @@ function normalizeIsAdmin($rawIsAdmin): bool
     return false;
 }
 
-function checkIsAdmin($employee): bool
+const USER_CONTEXT_ROLES = ['admin', 'cashier', 'worker', 'individual'];
+
+function parseUserContextRole(mixed $role): string
 {
-    if (!is_object($employee) || !isset($employee->permissions) || !is_object($employee->permissions)) {
-        return false;
-    }
+    return is_string($role) && in_array($role, USER_CONTEXT_ROLES, true) ? $role : 'individual';
+}
 
-    if (!isset($employee->permissions->admin) || !is_object($employee->permissions->admin)) {
-        return false;
-    }
-
-    return normalizeIsAdmin($employee->permissions->admin->view ?? null);
+function roleToIsAdmin(string $role): bool
+{
+    return $role === 'admin';
 }
 
 // Хранение пользовательского контекста в сессии.
-// contextKey используется только для начальной загрузки entrypoint.
+// Одноразовый токен из requestUserContextToken() нужен только чтобы поднять сессию.
 // Дальше backend-запросы авторизуются через contextNonce из активной PHP-сессии.
 
 const USER_CONTEXT_SESSION_KEY = 'userContext';
@@ -350,9 +349,35 @@ function currentEpochMs(): int
 class VendorApi
 {
 
-    function context(string $contextKey): mixed
+    /**
+     * Меняет одноразовый токен из requestUserContextToken() на контекст пользователя.
+     *
+     * @return array{ok: bool, status: int, code: ?string, user: ?array{accountId: string, userId: string, userUid: string, role: string}}
+     */
+    function exchangeUserContext(string $token): array
     {
-        return $this->request('POST', '/context/' . $contextKey);
+        $response = makeHttpRequestDetailed(
+            'POST',
+            cfg()->moyskladVendorApiEndpointUrl . '/context/user',
+            buildJWT(),
+            json_encode(['token' => $token]),
+            false);
+
+        if (!$response['ok']) {
+            $status = $response['status'] >= 400 && $response['status'] <= 599 ? $response['status'] : 502;
+
+            return ['ok' => false, 'status' => $status, 'code' => parseZeusErrorCode($response['body']), 'user' => null];
+        }
+
+        $user = normalizeUserContext($response['body']);
+
+        if ($user === null) {
+            log_message('WARN', 'Vendor API returned an invalid user context response');
+
+            return ['ok' => false, 'status' => 502, 'code' => null, 'user' => null];
+        }
+
+        return ['ok' => true, 'status' => $response['status'], 'code' => null, 'user' => $user];
     }
 
     function updateAppStatus(string $appId, string $accountId, string $status): mixed
@@ -372,7 +397,73 @@ class VendorApi
     }
 }
 
+function normalizeUserContext(mixed $body): ?array
+{
+    if (!is_object($body)) {
+        return null;
+    }
+
+    $accountId = trim((string)($body->accountId ?? ''));
+    $userId = trim((string)($body->userId ?? ''));
+    $userUid = trim((string)($body->userUid ?? ''));
+
+    if ($accountId === '' || $userId === '' || $userUid === '') {
+        return null;
+    }
+
+    return [
+        'accountId' => $accountId,
+        'userId' => $userId,
+        'userUid' => $userUid,
+        'role' => parseUserContextRole($body->role ?? null),
+    ];
+}
+
+function parseZeusErrorCode(mixed $body): ?string
+{
+    if (!is_object($body)) {
+        return null;
+    }
+
+    if (isset($body->errors) && is_array($body->errors) && isset($body->errors[0]->code)) {
+        return (string)$body->errors[0]->code;
+    }
+
+    return isset($body->code) ? (string)$body->code : null;
+}
+
 function makeHttpRequest(string $method, string $url, string $bearerToken, mixed $data = null): mixed
+{
+    $response = makeHttpRequestDetailed($method, $url, $bearerToken, $data);
+
+    if ($response['status'] === 0) {
+        return null;
+    }
+
+    if ($response['status'] >= 400) {
+        log_message('WARN', "HTTP {$response['status']} for $method $url");
+
+        return null;
+    }
+
+    if ($response['raw'] === '') {
+        return $response['ok'];
+    }
+
+    if ($response['body'] === null) {
+        log_message('WARN', "Failed to decode JSON for $method $url");
+
+        return null;
+    }
+
+    return $response['body'];
+}
+
+/**
+ * @return array{ok: bool, status: int, body: mixed, raw: string}
+ *   status 0 означает транспортную ошибку, body — декодированный JSON или null.
+ */
+function makeHttpRequestDetailed(string $method, string $url, string $bearerToken, mixed $data = null, bool $logBody = true): array
 {
     $curl = curl_init($url);
 
@@ -382,7 +473,7 @@ function makeHttpRequest(string $method, string $url, string $bearerToken, mixed
         $headers[] = 'Content-type: application/json';
     }
 
-    log_message('DEBUG', "Request: $method $url" . print_r($headers, true) . print_r($data, true));
+    log_message('DEBUG', "Request: $method $url" . print_r($headers, true) . ($logBody ? print_r($data, true) : ''));
 
     $options = [
         CURLOPT_RETURNTRANSFER => true,
@@ -412,34 +503,31 @@ function makeHttpRequest(string $method, string $url, string $bearerToken, mixed
     if ($error) {
         log_message('ERROR', "Response error: $error");
 
-        return null;
+        return ['ok' => false, 'status' => 0, 'body' => null, 'raw' => ''];
     }
 
     $statusCode = (int)($info['http_code'] ?? 0);
     $headerSize = (int)($info['header_size'] ?? 0);
     $body = substr((string)$response, $headerSize);
 
-    log_message('DEBUG', "Response: $method $url\n$response");
+    log_message('DEBUG', "Response: $method $url\n" . ($logBody ? $response : substr((string)$response, 0, $headerSize)));
 
-    if ($statusCode >= 400) {
-        log_message('WARN', "HTTP $statusCode for $method $url");
+    $decoded = null;
 
-        return null;
+    if ($body !== '') {
+        $decoded = json_decode($body);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            $decoded = null;
+        }
     }
 
-    if ($body === '') {
-        return $statusCode >= 200 && $statusCode < 300;
-    }
-
-    $decoded = json_decode($body);
-
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        log_message('WARN', "Failed to decode JSON for $method $url: " . json_last_error_msg());
-
-        return null;
-    }
-
-    return $decoded;
+    return [
+        'ok' => $statusCode >= 200 && $statusCode < 300,
+        'status' => $statusCode,
+        'body' => $decoded,
+        'raw' => $body,
+    ];
 }
 
 $vendorApi = new VendorApi();
@@ -541,7 +629,7 @@ function redactSensitiveLogMessage(string $message): string
         $message = $redacted;
     }
 
-    $redacted = preg_replace('~(/context/)[^/?#\s]+~', '$1<redacted>', $message);
+    $redacted = preg_replace('~(?i)(["\']?token["\']?\s*[:=]\s*)(["\']?)[^"\'&,\s}]+(\2)~', '$1$2<redacted>$3', $message);
     if ($redacted !== null) {
         $message = $redacted;
     }
