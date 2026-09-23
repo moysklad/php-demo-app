@@ -6,6 +6,7 @@ vendor/
 .tools/
 .env
 .env.local
+descriptor.xml
 .idea
 *.iml
 **/.DS_Store
