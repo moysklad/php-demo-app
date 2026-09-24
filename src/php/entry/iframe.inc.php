@@ -1,5 +1,8 @@
 <?php
 
+// [feature:loyalty] программа лояльности: данные вкладки приходят из модуля src/php/loyalty.
+require_once __DIR__ . '/../loyalty/loyalty.inc.php';
+
 /**
  * Собирает данные основного iframe для активного контекста пользователя.
  *
@@ -12,7 +15,6 @@ function buildIframePageData(array $context): array
 
     $app = AppInstance::loadApp($accountId);
 
-    $isSettingsRequired = $app->status !== AppInstance::ACTIVATED;
     $storesValues = [];
 
     if (empty($app->accessToken)) {
@@ -35,20 +37,16 @@ function buildIframePageData(array $context): array
 
     return [
         'accountId' => $accountId,
-        'isAdmin' => $isAdmin,
-        'accessLevel' => $isAdmin ? 'администратор аккаунта' : 'простой пользователь',
         'uid' => (string)$context['uid'],
         'fio' => (string)$context['fio'],
+        'isAdmin' => $isAdmin,
         'contextNonce' => (string)$context['contextNonce'],
         'appVersion' => appVersion(),
-        'hasAccessToken' => !empty($app->accessToken),
+        'infoMessage' => $app->infoMessage ?? '',
+        'store' => $app->store ?? '',
         'storesValues' => $storesValues,
-        'status' => [
-            'className' => $isSettingsRequired ? 'status-required' : 'status-ready',
-            'title' => $isSettingsRequired ? 'ТРЕБУЕТСЯ НАСТРОЙКА' : 'РЕШЕНИЕ ГОТОВО К РАБОТЕ',
-            'showDetails' => !$isSettingsRequired,
-            'infoMessage' => $app->infoMessage ?? '',
-            'store' => $app->store ?? '',
-        ],
+        'status' => describeAppStatus($app),
+        // [feature:loyalty] программа лояльности: на статус решения подключение не влияет.
+        ...loyaltyIframePageData($accountId),
     ];
 }

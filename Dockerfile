@@ -1,3 +1,11 @@
+# Собираем основной iframe (React + @moysklad/uikit) из frontend/ в src/php/assets/entry
+FROM node:24-alpine AS frontend
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json frontend/.npmrc ./
+RUN npm ci --no-audit --no-fund
+COPY frontend ./
+RUN NODE_ENV=production npm run build
+
 # Используем официальный образ PHP с Apache
 FROM php:8.2-apache
 
@@ -25,6 +33,7 @@ RUN composer install --no-dev --prefer-dist --no-interaction --optimize-autoload
 
 # Копируем файлы приложения и обновляем autoload
 COPY . /var/www/html/
+COPY --from=frontend /app/src/php/assets/entry /var/www/html/src/php/assets/entry
 RUN composer dump-autoload --no-dev --optimize
 
 # Настраиваем права

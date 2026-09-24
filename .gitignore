@@ -10,3 +10,5 @@ descriptor.xml
 .idea
 *.iml
 **/.DS_Store
+frontend/node_modules/
+src/php/assets/entry/

@@ -1,7 +1,7 @@
 {
     "name": "moysklad/php-demo-app",
     "description": "PHP demo app for MoySklad Vendor API integration",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "license": "proprietary",
     "type": "project",
     "require": {

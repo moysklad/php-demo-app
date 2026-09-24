@@ -1,0 +1,15 @@
+/*
+ * @moysklad/uikit жестко ссылается на семейство "ALS Hauss" — это коммерческий шрифт МоегоСклада,
+ * распространять его в демо-решении нельзя. Вместо него под тем же именем подключаем свободный
+ * Onest (SIL OFL 1.1, лицензия рядом с файлом): он метрически ближе всего к ALS Hauss.
+ * Файл — variable-шрифт Onest 2.001 (github.com/simpals/onest), только начертание normal:
+ * italic кит не использует, при необходимости браузер синтезирует наклон.
+ * Чтобы использовать лицензионный ALS Hauss, замените файл шрифта и путь в src.
+ */
+@font-face {
+  font-family: "ALS Hauss";
+  src: url("./fonts/onest/onest-2.001-variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}

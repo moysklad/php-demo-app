@@ -11,6 +11,8 @@
     <vendorApi>
         <endpointBase><?= cfg()->appBaseUrl ?>/api/vendor-endpoint.php</endpointBase>
     </vendorApi>
+    <!-- [feature:loyalty] пропуск на PUT .../loyalty в Vendor API, сам по себе ничего не включает -->
+    <loyaltyApi/>
     <access>
         <resource>https://api.moysklad.ru/api/remap/1.2</resource>
         <scope>admin</scope>

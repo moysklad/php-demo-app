@@ -5,6 +5,8 @@
 В демо-приложении реализованы следующие функции:
 * Активация (с получением токена доступа к JSON API 1.2) и деактивация по Vendor API
 * Использование iframe для настройки решения администратором аккаунта с обновлением статуса в МоемСкладе
+* Основной iframe на React и UI Kit МоегоСклада (`@moysklad/uikit`) с вкладкой живых примеров компонентов
+* Подключение программы лояльности (Loyalty API) и заглушка провайдера с внешним поиском покупателей
 * Получение контекста пользователя для iframe и виджетов по одноразовому токену из JS Widget SDK (отображение информации по пользователю, проверка прав администратора)
 * Примеры работы с PHP-сессией: обмен одноразового токена на `contextNonce` и повторное использование активного контекста в iframe/виджетах
 * Пример авторизации запросов из iframe/виджета на backend через cookie и `$_SESSION`
@@ -35,6 +37,18 @@ Docker Compose:
 docker compose up --build
 ```
 
+Вместе с PHP поднимается сервис `frontend`: он ставит npm-зависимости и пересобирает основной iframe
+из `frontend/` в `src/php/assets/entry` при каждом изменении исходников. В образ решения (`Dockerfile`)
+бандл собирается отдельной стадией на Node.js, поэтому для сборки образа Node.js на хосте не нужен.
+
+Собрать фронт без Docker (нужен Node.js 24):
+
+```bash
+cd frontend
+npm ci
+npm run build
+```
+
 Проверка:
 
 ```bash
@@ -50,6 +64,40 @@ composer install
 php -l src/php/lib/lib.php
 php src/php/utils/generate-descriptor.php
 ```
+
+## Основной iframe и UI Kit
+
+Основной iframe — React-приложение на [`@moysklad/uikit`](https://www.npmjs.com/package/@moysklad/uikit),
+React-библиотеке компонентов МоегоСклада. Исходники лежат в `frontend/`, сборка — esbuild (`frontend/build.mjs`).
+PHP отдает только HTML-оболочку (`entry/iframe.php`), контекст пользователя и данные страницы клиент получает
+через `entry/user-context.php`, настройки сохраняет в `utils/update-settings.php`. Виджеты и popup
+остаются на PHP-шаблонах с подключением JS Widget SDK с CDN.
+
+Вкладки основного iframe:
+* Основное — пользователь, статус и версия решения, форма настроек, проверка `autoResizeIframe()`
+* Программа лояльности — см. раздел «Программа лояльности»
+* Примеры UI Kit — компоненты кита в работе с фрагментами кода под копирование, в том числе в ширине виджета (400px); описание — в [frontend/src/uikit-examples/README.md](frontend/src/uikit-examples/README.md)
+
+Правила использования кита:
+* Компоненты импортируются точечно: `import { Button } from "@moysklad/uikit/components/Button"`. Импорт из корня пакета тянет в бандл всю библиотеку.
+* `@moysklad/uikit/colorVariables.css` подключается один раз — в `frontend/src/ui/theme.css`, до стилей компонентов.
+* Оверлеи кита рисуются внутри iframe: `position: fixed` считается от всего iframe. Полноценные диалоги — попапы через `sdk.showPopup()`, `Modal` кита — только для легких подтверждений, `Snackbar` и `Sidepage` внутри iframe не используйте.
+
+UI Kit ссылается на шрифт `ALS Hauss` — коммерческий шрифт МоегоСклада, который нельзя распространять в составе
+демо-решения. Под этим именем подключен свободный [Onest](https://github.com/simpals/onest) (SIL OFL 1.1):
+`frontend/src/ui/fonts.css` и файл `frontend/src/ui/fonts/onest/onest-2.001-variable.woff2` (лицензия — рядом, `OFL.txt`).
+Если у вас есть лицензия на ALS Hauss, замените файл шрифта и путь в `fonts.css`.
+
+## Программа лояльности
+
+Решение демонстрирует точку встраивания «Программа лояльности» (подключается по желанию): вкладку в основном iframe,
+передачу настроек через `PUT /apps/{appId}/{accountId}/loyalty` Vendor API и заглушку провайдера Loyalty API
+(`loyalty/provider.php`) с демонстрационным внешним поиском покупателей. Это заглушки, реализующие контракт
+Loyalty API, а не готовая бонусная система.
+
+Код собран в модуль `src/php/loyalty/` (вкладка — `frontend/src/loyalty/`), общий код он трогает только в помеченных
+местах: `grep -rn "feature:loyalty" src/ frontend/src/`. Платформенные особенности, список методов провайдера и
+порядок действий «как взять за основу» — в [src/php/loyalty/README.md](src/php/loyalty/README.md).
 
 ## Виджеты
 
@@ -108,7 +156,7 @@ php src/php/utils/generate-descriptor.php
 * `APP_SECRET_KEY`                  - секретный ключ для подписи JWT запросов Vendor API
 * `APP_BASE_URL`                    - базовый URL решения, должен указывать на содержимое `./src/php` (сейчас используется при генерации дескриптора)
 * `APP_DB_PATH`                     - опционально: путь к SQLite; по умолчанию `src/php/data/app.sqlite` 
-* `APP_ENCRYPT_KEY`                 - ключ шифрования `access_token` в БД (сгенерировать: `bin2hex(sodium_crypto_secretbox_keygen())`). **Не менять** после установки: токены в БД станут нерасшифровываемы.
+* `APP_ENCRYPT_KEY`                 - ключ шифрования `access_token` и токена программы лояльности в БД (сгенерировать: `bin2hex(sodium_crypto_secretbox_keygen())`). **Не менять** после установки: токены в БД станут нерасшифровываемы.
 * `MOYSKLAD_VENDOR_API_URL`         - опционально: переопределить URL Vendor API (по умолчанию в `config.php`: `https://apps-api.moysklad.ru/api/vendor/1.0`)
 * `MOYSKLAD_JSON_API_URL`           - опционально: переопределить URL JSON API 1.2 (по умолчанию в `config.php`: `https://api.moysklad.ru/api/remap/1.2`)
 
@@ -121,7 +169,8 @@ php src/php/utils/generate-descriptor.php
 * `composer.json`, `composer.lock`   - зависимости от сторонних библиотек, включая `firebase/php-jwt` для JWT
 * `config.php`                       - конфигурация решения
 * `docker-compose.yml`               - конфигурация для запуска в режиме разработки. Каталог `src/php` смонтирован в контейнер: изменения PHP-кода и данных в `src/php/data/` применяются без пересборки образа 
-* `entry/iframe.php`                 - контроллер отображения оболочки iframe
+* `frontend/`                        - исходники основного iframe на React и UI Kit, сборка в `src/php/assets/entry`
+* `entry/iframe.php`                 - HTML-оболочка основного iframe, подключает собранный бандл
 * `entry/iframe.inc.php`             - сборка данных основного iframe для активного контекста пользователя
 * `entry/user-context.php`           - обмен одноразового токена из JS Widget SDK на контекст пользователя и PHP-сессию
 * `entry/popup.php`                  - контроллер отображения popup
@@ -134,6 +183,7 @@ php src/php/utils/generate-descriptor.php
 * `lib/lib.php`                      - общие классы приложения (конфигурация, модели данных, врапперы доступа к API МоегоСклада)
 * `lib/app-repo.php`                 - репозиторий для хранения установок приложения (SQLite)
 * `lib/jwt-repo.php`                 - репозиторий для хранения и проверки одноразовости JWT (JTI)
+* `loyalty/`                         - модуль программы лояльности: провайдер Loyalty API, подключение, хранилище
 
 ### Файлы виджетов
 
@@ -156,9 +206,10 @@ php src/php/utils/generate-descriptor.php
 ### Данные
 
 Серверное состояние установок решений хранится в `SQLite` через `PDO` (`pdo_sqlite`), по умолчанию файл `src/php/data/app.sqlite` (путь вычисляется в `appDatabasePath()`, переопределение — через `APP_DB_PATH`).
-При первом обращении backend автоматически создаёт файл БД и таблицу `account_application`.
+При первом обращении backend автоматически создаёт файл БД и таблицы `account_application`, `jwt` и `loyalty_installation`.
 В таблице хранится серверное состояние установки по ключу `(account_id, application_id)`:
 токен доступа к JSON API (зашифрован через `sodium_crypto_secretbox`), статус приложения и настройки (`infoMessage`, `store`).
+В `loyalty_installation` — подключение программы лояльности: токен провайдера (тоже зашифрован), режим внешнего поиска и признак того, что МойСклад принял настройки.
 
 Для промышленного применения рекомендуется подключить внешнюю БД (например, PostgreSQL через PDO).
 

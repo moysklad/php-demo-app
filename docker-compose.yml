@@ -1,4 +1,12 @@
 services:
+  frontend:
+    image: node:24-alpine
+    user: node
+    working_dir: /app/frontend
+    command: sh -c "npm ci --no-audit --no-fund && npm run watch"
+    volumes:
+      - ./frontend:/app/frontend
+      - ./src/php/assets:/app/src/php/assets
   php-demo-app:
     build:
       context: .

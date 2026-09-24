@@ -1,0 +1,104 @@
+/* Порядок важен: шрифт → переменные кита (@layer) → стили компонентов, которые esbuild добавит из импортов. */
+@import "./fonts.css";
+@import "@moysklad/uikit/colorVariables.css";
+
+/*
+ * Единственные собственные стили демо-решения: сетка страницы и рамка вложенного блока.
+ * Карточки страниц — <BentoBlock> кита.
+ */
+body {
+  margin: 0;
+  background: var(--bgd-secondary);
+  color: var(--text-primary);
+  /* Размер обязателен: кнопки наследуют шрифт отсюда, без него они получат браузерные 16px. */
+  font: 400 14px/20px "ALS Hauss", sans-serif;
+}
+
+/*
+ * Кнопки не наследуют шрифт и цвет по умолчанию, а компоненты кита на <button>
+ * (Tabs.Item, SegmentButton) своих не задают — без этого правила там системный шрифт.
+ */
+button {
+  font: inherit;
+  color: inherit;
+}
+
+/*
+ * Checkbox и Radiobutton кита держат в потоке невидимый <input> и рассчитывают на глобальный
+ * reset приложения: браузерные margin у инпута (4px слева) иначе сдвигают иконку и label,
+ * и подпись info перестает быть вровень с текстом.
+ */
+input {
+  margin: 0;
+}
+
+.page {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+  padding: 16px;
+}
+
+.page__wide {
+  grid-column: 1 / -1;
+}
+
+/* Вкладки разделов лежат вне сетки .page — выравниваем их по её горизонтальному отступу. */
+.page-tabs {
+  padding: 20px 16px 0;
+}
+
+/* Табы групп примеров — вне бенто; метки по содержимому, без переносов в две строки. */
+.group-tabs {
+  flex-wrap: wrap;
+}
+
+.group-tabs button {
+  white-space: nowrap;
+}
+
+/* Бенто в бенто не вкладывают: вложенный блок внутри BentoBlock — рамка с обводкой. */
+.frame {
+  border: 1px solid var(--border-normal);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+/*
+ * Пункт меню в Dropdown: своего Dropdown.Item в ките нет (и в 31.x пока тоже),
+ * стили повторяют Select.Option кита. Hover без CSS не сделать, поэтому класс здесь,
+ * а не в самодостаточной секции примеров.
+ */
+.menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-item:hover {
+  background: var(--elements-bg-hover);
+}
+
+/*
+ * Рамка инпута Datepicker в ките — outline, он рисуется снаружи элемента; когда поле прижато
+ * к левому краю карточки, линию срезает overflow-контейнер BentoBlock. Пиксель зазора возвращает ее.
+ * Именно margin: padding и border обёртки кит сбрасывает своим правилом позже в бандле.
+ */
+.react-datepicker-wrapper {
+  margin-left: 1px;
+}
+
+.log {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
