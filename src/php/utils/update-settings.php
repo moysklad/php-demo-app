@@ -37,18 +37,10 @@ if (!$statusUpdated) {
 
 $app->persist();
 
-$isSettingsRequired = $app->status !== AppInstance::ACTIVATED;
-
 header('Content-Type: application/json; charset=UTF-8');
 echo json_encode([
     'message' => 'Настройки обновлены',
-    'status' => [
-        'className' => $isSettingsRequired ? 'status-required' : 'status-ready',
-        'title' => $isSettingsRequired ? 'ТРЕБУЕТСЯ НАСТРОЙКА' : 'РЕШЕНИЕ ГОТОВО К РАБОТЕ',
-        'showDetails' => !$isSettingsRequired,
-        'infoMessage' => $app->infoMessage ?? '',
-        'store' => $app->store ?? '',
-    ],
+    'status' => describeAppStatus($app),
 ], JSON_UNESCAPED_UNICODE);
 
 function replyUpdateSettingsError(string $message): void

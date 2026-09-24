@@ -725,6 +725,24 @@ class AppInstance
     }
 }
 
+/**
+ * Состояние решения для карточки статуса в основном iframe: данные страницы и ответ utils/update-settings.php.
+ *
+ * @return array{badge: string, title: string, showDetails: bool, infoMessage: string, store: string}
+ */
+function describeAppStatus(AppInstance $app): array
+{
+    $isSettingsRequired = $app->status !== AppInstance::ACTIVATED;
+
+    return [
+        'badge' => $isSettingsRequired ? 'orange' : 'green',
+        'title' => $isSettingsRequired ? 'Требуется настройка' : 'Решение готово к работе',
+        'showDetails' => !$isSettingsRequired,
+        'infoMessage' => $app->infoMessage ?? '',
+        'store' => $app->store ?? '',
+    ];
+}
+
 require_once __DIR__ . '/app-repo.php';
 require_once __DIR__ . '/jwt-repo.php';
 

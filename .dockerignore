@@ -9,3 +9,5 @@ src/php/data/*.sqlite
 src/php/data/*.sqlite-wal
 src/php/data/*.sqlite-shm
 **/.DS_Store
+frontend/node_modules/
+src/php/assets/entry/

@@ -25,7 +25,7 @@ class AppInstanceSqliteRepository extends SqliteRepository
         }
 
         $app->status = isset($row['status']) ? (int)$row['status'] : AppInstance::UNKNOWN;
-        $app->accessToken = isset($row['access_token']) ? $this->decryptToken($row['access_token']) : null;
+        $app->accessToken = isset($row['access_token']) ? $this->decryptSecret($row['access_token'], 'access_token') : null;
         $app->infoMessage = $row['info_message'] ?? null;
         $app->store = $row['store'] ?? null;
 
@@ -68,7 +68,7 @@ class AppInstanceSqliteRepository extends SqliteRepository
             ':account_id' => (string)$app->accountId,
             ':application_id' => (string)$app->appId,
             ':status' => (int)$app->status,
-            ':access_token' => $this->encryptToken($this->normalizeNullableString($app->accessToken)),
+            ':access_token' => $this->encryptSecret($this->normalizeNullableString($app->accessToken)),
             ':info_message' => $this->normalizeNullableString($app->infoMessage),
             ':store' => $this->normalizeNullableString($app->store),
             ':created_at' => $timestamp,
@@ -136,61 +136,5 @@ class AppInstanceSqliteRepository extends SqliteRepository
         $value = trim((string)$value);
 
         return $value === '' ? null : $value;
-    }
-
-    private function encryptToken(?string $token): ?string
-    {
-        if ($token === null) {
-            return null;
-        }
-
-        $key = $this->encryptionKey();
-        $nonce = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
-        $encrypted = sodium_crypto_secretbox($token, $nonce, $key);
-
-        return base64_encode($nonce . $encrypted);
-    }
-
-    private function decryptToken(?string $encrypted): ?string
-    {
-        if ($encrypted === null) {
-            return null;
-        }
-
-        $data = base64_decode($encrypted, true);
-        $nonceSize = SODIUM_CRYPTO_SECRETBOX_NONCEBYTES;
-
-        if ($data === false || strlen($data) <= $nonceSize) {
-            $message = 'Corrupted access_token in storage. Reinstall the application.';
-            log_message('ERROR', $message);
-            throw new RuntimeException($message);
-        }
-
-        $key = $this->encryptionKey();
-        $nonce = substr($data, 0, $nonceSize);
-        $ciphertext = substr($data, $nonceSize);
-        $result = sodium_crypto_secretbox_open($ciphertext, $nonce, $key);
-
-        if ($result === false) {
-            $message = 'Failed to decrypt access_token: wrong key or corrupted data. Reinstall the application.';
-            log_message('ERROR', $message);
-            throw new RuntimeException($message);
-        }
-
-        return $result;
-    }
-
-    private function encryptionKey(): string
-    {
-        $hexKey = cfg()->encryptKey;
-        $expectedLen = SODIUM_CRYPTO_SECRETBOX_KEYBYTES * 2; // 64 hex chars
-
-        if (strlen($hexKey) !== $expectedLen || !ctype_xdigit($hexKey)) {
-            $message = "APP_ENCRYPT_KEY must be {$expectedLen} hex chars. Generate: bin2hex(sodium_crypto_secretbox_keygen())";
-            log_message('ERROR', $message);
-            throw new RuntimeException($message);
-        }
-
-        return hex2bin($hexKey);
     }
 }

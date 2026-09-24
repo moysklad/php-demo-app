@@ -6,6 +6,8 @@ use \Firebase\JWT\Key;
 require_once __DIR__ . '/../lib/lib.php';
 
 require_once __DIR__ . '/button.php';
+// [feature:loyalty] программа лояльности: реакция на Install/Uninstall.
+require_once __DIR__ . '/../loyalty/loyalty.inc.php';
 
 $method = (string)($_SERVER['REQUEST_METHOD'] ?? '');
 $path = (string)($_SERVER['PATH_INFO'] ?? '');
@@ -66,6 +68,8 @@ switch ($method) {
             $settingsRestored = $hasRequiredSettings;
 
             $app->status = $hasRequiredSettings ? AppInstance::ACTIVATED : AppInstance::SETTINGS_REQUIRED;
+            // [feature:loyalty] МойСклад удалил настройки лояльности вместе с прошлой установкой.
+            loyaltyOnInstall($appId, $accountId);
         } elseif ($cause === 'Resume') {
             // Приостановка временная: настройки не удалялись, решение продолжает работу с прежней конфигурацией
             $app->status = $hasRequiredSettings ? AppInstance::ACTIVATED : AppInstance::SETTINGS_REQUIRED;
@@ -133,6 +137,8 @@ switch ($method) {
                 // установке не заставлять пользователя настраивать решение заново. Если политика хранения
                 // данных требует обратного, вызовите здесь $app->delete()
                 $app->uninstall();
+                // [feature:loyalty] МойСклад удаляет настройки лояльности вместе с решением.
+                loyaltyOnUninstall($appId, $accountId);
                 log_message('INFO', "App appId=$appId uninstalled on accountId=$accountId, settings kept, cause=$cause");
 
                 break;
