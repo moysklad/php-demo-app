@@ -103,6 +103,7 @@ function roleToIsAdmin(string $role): bool
 
 const USER_CONTEXT_SESSION_KEY = 'userContext';
 const USER_CONTEXT_SESSION_TTL_SECONDS = 7200;
+const USER_CONTEXT_SESSION_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 function ensureSessionStarted(): void
 {
@@ -178,7 +179,12 @@ function refreshActiveUserContextInSession(array $context): void
 {
     ensureSessionStarted();
 
-    $context['expiresAt'] = currentEpochMs() + USER_CONTEXT_SESSION_TTL_SECONDS * 1000;
+    $expiresAt = currentEpochMs() + USER_CONTEXT_SESSION_TTL_SECONDS * 1000;
+    if ($expiresAt - $context['expiresAt'] < USER_CONTEXT_SESSION_REFRESH_INTERVAL_MS) {
+        return;
+    }
+
+    $context['expiresAt'] = $expiresAt;
     $_SESSION[USER_CONTEXT_SESSION_KEY] = $context;
 }
 
@@ -432,9 +438,9 @@ function parseZeusErrorCode(mixed $body): ?string
     return isset($body->code) ? (string)$body->code : null;
 }
 
-function makeHttpRequest(string $method, string $url, string $bearerToken, mixed $data = null): mixed
+function makeHttpRequest(string $method, string $url, string $bearerToken, mixed $data = null, bool $rateLimited = false): mixed
 {
-    $response = makeHttpRequestDetailed($method, $url, $bearerToken, $data);
+    $response = makeHttpRequestDetailed($method, $url, $bearerToken, $data, rateLimited: $rateLimited);
 
     if ($response['status'] === 0) {
         return null;
@@ -459,15 +465,68 @@ function makeHttpRequest(string $method, string $url, string $bearerToken, mixed
     return $response['body'];
 }
 
+const HTTP_MAX_RETRIES = 10;
+const HTTP_RETRY_BASE_MS = 250;
+
 /**
- * @return array{ok: bool, status: int, body: mixed, raw: string}
- *   status 0 означает транспортную ошибку, body — декодированный JSON или null.
+ * @return array{ok: bool, status: int, body: mixed, raw: string, retries: int}
+ *   status 0 означает транспортную ошибку; retries считает повторы после HTTP 429.
  */
-function makeHttpRequestDetailed(string $method, string $url, string $bearerToken, mixed $data = null, bool $logBody = true): array
+function makeHttpRequestDetailed(string $method, string $url, string $bearerToken, mixed $data = null,
+    bool $logBody = true, bool $rateLimited = false): array
+{
+    $gate = $rateLimited ? new LognexRateLimitGate(cfg()->moyskladJsonApiEndpointUrl, $bearerToken) : null;
+    // POST (в том числе обмен одноразового user-context токена) повторять нельзя.
+    $maxRetries = in_array(strtoupper($method), ['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'], true)
+        ? HTTP_MAX_RETRIES : 0;
+    $lognexRetries = 0;
+    $delayMs = 0;
+
+    for ($attempt = 0; ; $attempt++) {
+        $waitMs = $gate ? $gate->reserveDelay($delayMs) : $delayMs;
+        if ($waitMs > 0) {
+            usleep((int)ceil($waitMs * 1000));
+        }
+
+        $response = executeHttpRequest($method, $url, $bearerToken, $data, $logBody);
+        $status = $response['status'];
+        $retryAfterMs = nonNegativeIntegerHeader($response['headers'], 'x-lognex-retry-after');
+        if ($gate) {
+            $gate->observe($status, $response['headers']);
+        }
+
+        if ($attempt >= $maxRetries || !in_array($status, [0, 429, 502, 503, 504], true)) {
+            unset($response['headers']);
+            $response['retries'] = $lognexRetries;
+            return $response;
+        }
+
+        if ($status === 429) {
+            $lognexRetries++;
+        }
+        $delayMs = $status === 429 && $retryAfterMs !== null
+            ? ($gate ? 0 : $retryAfterMs)
+            : HTTP_RETRY_BASE_MS * ($attempt + 1);
+        log_message('WARN', 'Retry attempt ' . ($attempt + 2) . " for $method $url, status: $status");
+    }
+}
+
+function nonNegativeIntegerHeader(array $headers, string $name): ?int
+{
+    $value = $headers[$name] ?? null;
+    if (!is_string($value) || !preg_match('/^[0-9]+$/D', $value)) {
+        return null;
+    }
+
+    $number = filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+    return $number === false ? null : $number;
+}
+
+function executeHttpRequest(string $method, string $url, string $bearerToken, mixed $data, bool $logBody): array
 {
     $curl = curl_init($url);
-
     $headers = ['Authorization: Bearer ' . $bearerToken, 'Accept-Encoding: gzip'];
+    $responseHeaders = [];
 
     if ($data) {
         $headers[] = 'Content-type: application/json';
@@ -483,40 +542,42 @@ function makeHttpRequestDetailed(string $method, string $url, string $bearerToke
         CURLOPT_HTTPHEADER => $headers,
         CURLOPT_CUSTOMREQUEST => $method,
         CURLOPT_ENCODING => '',
-        CURLOPT_HEADER => true
+        CURLOPT_HEADER => true,
+        CURLOPT_HEADERFUNCTION => static function ($curl, string $line) use (&$responseHeaders): int {
+            // После redirect или 100 Continue учитываем только заголовки последнего ответа.
+            if (str_starts_with($line, 'HTTP/')) {
+                $responseHeaders = [];
+            } elseif (str_contains($line, ':')) {
+                [$name, $value] = explode(':', $line, 2);
+                $responseHeaders[strtolower(trim($name))] = trim($value);
+            }
+            return strlen($line);
+        },
     ];
 
     if ($method !== 'GET' && $data !== null) {
-        $options[CURLOPT_POSTFIELDS] = is_array($data)
-            ? http_build_query($data)
-            : $data;
+        $options[CURLOPT_POSTFIELDS] = is_array($data) ? http_build_query($data) : $data;
     }
 
     curl_setopt_array($curl, $options);
-
     $response = curl_exec($curl);
     $error = curl_error($curl);
     $info = curl_getinfo($curl);
-
     curl_close($curl);
 
     if ($error) {
         log_message('ERROR', "Response error: $error");
-
-        return ['ok' => false, 'status' => 0, 'body' => null, 'raw' => ''];
+        return ['ok' => false, 'status' => 0, 'body' => null, 'raw' => '', 'headers' => []];
     }
 
     $statusCode = (int)($info['http_code'] ?? 0);
     $headerSize = (int)($info['header_size'] ?? 0);
     $body = substr((string)$response, $headerSize);
-
     log_message('DEBUG', "Response: $method $url\n" . ($logBody ? $response : substr((string)$response, 0, $headerSize)));
 
     $decoded = null;
-
     if ($body !== '') {
         $decoded = json_decode($body);
-
         if (json_last_error() !== JSON_ERROR_NONE) {
             $decoded = null;
         }
@@ -527,6 +588,7 @@ function makeHttpRequestDetailed(string $method, string $url, string $bearerToke
         'status' => $statusCode,
         'body' => $decoded,
         'raw' => $body,
+        'headers' => $responseHeaders,
     ];
 }
 
@@ -570,7 +632,18 @@ class JsonApi
         return makeHttpRequest(
             'GET',
             cfg()->moyskladJsonApiEndpointUrl . '/entity/store',
-            $this->accessToken);
+            $this->accessToken, rateLimited: true);
+    }
+
+    /** @return array{stores: mixed, retries: int} */
+    function storesWithRetries(): array
+    {
+        $response = makeHttpRequestDetailed(
+            'GET',
+            cfg()->moyskladJsonApiEndpointUrl . '/entity/store',
+            $this->accessToken, rateLimited: true);
+
+        return ['stores' => $response['ok'] ? $response['body'] : null, 'retries' => $response['retries']];
     }
 
     function getObject(string $entity, string $objectId): mixed
@@ -578,7 +651,7 @@ class JsonApi
         return makeHttpRequest(
             'GET',
             cfg()->moyskladJsonApiEndpointUrl . "/entity/$entity/$objectId",
-            $this->accessToken);
+            $this->accessToken, rateLimited: true);
     }
 
 }
@@ -743,6 +816,7 @@ function describeAppStatus(AppInstance $app): array
     ];
 }
 
+require_once __DIR__ . '/rate-limit.php';
 require_once __DIR__ . '/app-repo.php';
 require_once __DIR__ . '/jwt-repo.php';
 
