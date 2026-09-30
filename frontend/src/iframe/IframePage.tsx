@@ -6,6 +6,7 @@ import { LoyaltyTab } from "../loyalty/LoyaltyTab";
 // [feature:uikit-examples] примеры UI Kit: вкладка живет в модуле frontend/src/uikit-examples.
 import { ExamplesTab } from "../uikit-examples/ExamplesTab";
 import type { AppStatusView, IframePageData } from "./page-data";
+import { RetryTestForm } from "./RetryTestForm";
 import { ResizeProbe } from "./ResizeProbe";
 import { SettingsForm } from "./SettingsForm";
 import { StatusCard } from "./StatusCard";
@@ -50,6 +51,11 @@ export function IframePage({ data }: { data: IframePageData }) {
           <BentoBlock as="section">
             <SettingsForm data={data} saved={settings} onSaved={handleSettingsSaved} />
           </BentoBlock>
+          {data.isAdmin && (
+            <BentoBlock as="section">
+              <RetryTestForm contextNonce={data.contextNonce} />
+            </BentoBlock>
+          )}
           <BentoBlock as="section" containerClassName="page__wide">
             <ResizeProbe />
           </BentoBlock>

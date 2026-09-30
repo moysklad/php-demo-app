@@ -35,6 +35,7 @@ abstract class SqliteRepository
             $pdo = new PDO('sqlite:' . $databasePath);
             $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
             $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+            $pdo->exec('PRAGMA busy_timeout=5000');
             $this->initializeSchema($pdo);
             $this->pdo = $pdo;
         } catch (Throwable $exception) {
