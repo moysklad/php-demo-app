@@ -7,7 +7,7 @@ COPY frontend ./
 RUN NODE_ENV=production npm run build
 
 # Используем официальный образ PHP с Apache
-FROM php:8.2-apache
+FROM php:8.2.35-apache
 
 # Устанавливаем системные зависимости
 RUN apt-get update && apt-get install -y \
