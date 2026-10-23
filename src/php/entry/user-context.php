@@ -52,6 +52,8 @@ $response = [
 
 if (($body['page'] ?? null) === 'iframe') {
     $response['pageData'] = buildIframePageData($context);
+} elseif (($body['page'] ?? null) === 'chat') {
+    $response['pageData'] = buildChatPageData($context);
 }
 
 echo json_encode($response, JSON_UNESCAPED_UNICODE);

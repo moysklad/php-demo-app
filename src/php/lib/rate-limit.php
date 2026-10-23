@@ -14,12 +14,17 @@ class LognexRateLimitGate extends SqliteRepository
         $this->key = hash('sha256', $apiUrl . "\0" . $bearerToken);
     }
 
-    public function reserveDelay(int $minimumDelayMs = 0): int
+    // Возвращает ожидание до слота в мс; -1, если слот откроется позже бюджета: тогда он не занимается.
+    public function reserveDelay(int $minimumDelayMs = 0, ?int $budgetMs = null): int
     {
-        return $this->updateState(function (array &$state, int $now) use ($minimumDelayMs): int {
+        return $this->updateState(function (array &$state, int $now) use ($minimumDelayMs, $budgetMs): int {
             $startAt = max($now + $minimumDelayMs, $state['not_before']);
+            $delayMs = (int)ceil($startAt - $now);
+            if ($budgetMs !== null && $delayMs >= $budgetMs) {
+                return -1;
+            }
             $state['not_before'] = $startAt + $state['spacing_ms'];
-            return (int)ceil($startAt - $now);
+            return $delayMs;
         });
     }
 

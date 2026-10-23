@@ -21,6 +21,7 @@ class LoyaltyInstallation
     // Настройки, отправленные в МойСклад, но еще не подтвержденные.
     public ?string $pendingProviderToken = null;
     public bool $pendingExternalSearch = false;
+    /** @var array{0: ?string, 1: bool} ожидающие настройки на момент начала текущей попытки */
 
     public function __construct(string $appId, string $accountId)
     {
@@ -61,9 +62,21 @@ class LoyaltyInstallation
         return $this->externalSearch || ($this->pendingProviderToken !== null && $this->pendingExternalSearch);
     }
 
+    /** @return array{0: ?string, 1: bool} */
+    function pendingSettings(): array
+    {
+        return [$this->pendingProviderToken, $this->pendingExternalSearch];
+    }
+
+    // Пока исход ожидающего токена не известен, заменить его другим нельзя: МойСклад мог его принять.
+    function canBeginUpdate(?string $providerToken): bool
+    {
+        return $this->pendingProviderToken === null || $providerToken === null || $providerToken === $this->pendingProviderToken;
+    }
+
     function beginUpdate(?string $providerToken, bool $externalSearch): void
     {
-        $this->pendingProviderToken = $providerToken ?? $this->providerToken ?? bin2hex(random_bytes(32));
+        $this->pendingProviderToken = $providerToken ?? $this->pendingProviderToken ?? $this->providerToken ?? bin2hex(random_bytes(32));
         $this->pendingExternalSearch = $externalSearch;
     }
 
@@ -72,10 +85,16 @@ class LoyaltyInstallation
         $this->providerToken = $this->pendingProviderToken;
         $this->externalSearch = $this->pendingExternalSearch;
         $this->connectedAt = gmdate('c');
-        $this->discardUpdate();
+        $this->clearPending();
     }
 
-    function discardUpdate(): void
+    /** @param array{0: ?string, 1: bool} $previousPending */
+    function discardUpdate(array $previousPending): void
+    {
+        [$this->pendingProviderToken, $this->pendingExternalSearch] = $previousPending;
+    }
+
+    private function clearPending(): void
     {
         $this->pendingProviderToken = null;
         $this->pendingExternalSearch = false;
@@ -86,7 +105,7 @@ class LoyaltyInstallation
     function markDisconnected(): void
     {
         $this->connectedAt = null;
-        $this->discardUpdate();
+        $this->clearPending();
     }
 
     function persist(): void
@@ -309,7 +328,8 @@ function resetLoyaltyConnection(string $appId, string $accountId): void
 /**
  * Передает настройки Loyalty API в МойСклад: PUT /apps/{appId}/{accountId}/loyalty.
  *
- * outcome: ok; rejected — МойСклад точно не принял настройки; unknown — ответа нет или 5xx, настройки могли примениться.
+ * outcome: ok; rejected — МойСклад точно не принял настройки (4xx с описанием ошибки);
+ * unknown — ответа нет, 5xx или ответ без описания: настройки могли примениться.
  *
  * @return array{outcome: string, code: ?int, message: string}
  */
@@ -334,7 +354,7 @@ function updateLoyaltySettings(string $appId, string $accountId, string $url, st
     $error = is_object($response['body']) && isset($response['body']->errors[0]) ? $response['body']->errors[0] : null;
 
     if (!is_object($error) || empty($error->error)) {
-        return ['outcome' => 'rejected', 'code' => null, 'message' => "Vendor API ответил статусом {$response['status']}"];
+        return ['outcome' => 'unknown', 'code' => null, 'message' => "Vendor API ответил статусом {$response['status']} без описания ошибки"];
     }
 
     $code = isset($error->code) && is_int($error->code) ? $error->code : null;

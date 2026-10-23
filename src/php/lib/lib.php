@@ -467,28 +467,37 @@ function makeHttpRequest(string $method, string $url, string $bearerToken, mixed
 
 const HTTP_MAX_RETRIES = 10;
 const HTTP_RETRY_BASE_MS = 250;
+const HTTP_TIMEOUT_MS = 30_000;
+const SCENARIO_OBJECT_BUDGET_MS = 5_000;
 
 /**
+ * @param ?int $budgetMs общий бюджет на ожидание лимитера и сам запрос: если слот не откроется вовремя,
+ *   запрос не отправляется и возвращается как транспортная ошибка.
  * @return array{ok: bool, status: int, body: mixed, raw: string, retries: int}
  *   status 0 означает транспортную ошибку; retries считает повторы после HTTP 429.
  */
 function makeHttpRequestDetailed(string $method, string $url, string $bearerToken, mixed $data = null,
-    bool $logBody = true, bool $rateLimited = false): array
+    bool $logBody = true, bool $rateLimited = false, int $maxRetries = HTTP_MAX_RETRIES, ?int $budgetMs = null): array
 {
     $gate = $rateLimited ? new LognexRateLimitGate(cfg()->moyskladJsonApiEndpointUrl, $bearerToken) : null;
     // POST (в том числе обмен одноразового user-context токена) повторять нельзя.
     $maxRetries = in_array(strtoupper($method), ['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'], true)
-        ? HTTP_MAX_RETRIES : 0;
+        ? $maxRetries : 0;
     $lognexRetries = 0;
     $delayMs = 0;
 
     for ($attempt = 0; ; $attempt++) {
-        $waitMs = $gate ? $gate->reserveDelay($delayMs) : $delayMs;
+        $waitMs = $gate ? $gate->reserveDelay($delayMs, $budgetMs) : $delayMs;
+        if ($waitMs < 0) {
+            log_message('WARN', "Skipped $method $url: rate limit wait exceeds budget of {$budgetMs} ms");
+            return ['ok' => false, 'status' => 0, 'body' => null, 'raw' => '', 'retries' => $lognexRetries];
+        }
         if ($waitMs > 0) {
-            usleep((int)ceil($waitMs * 1000));
+            usleep($waitMs * 1000);
         }
 
-        $response = executeHttpRequest($method, $url, $bearerToken, $data, $logBody);
+        $timeoutMs = $budgetMs === null ? HTTP_TIMEOUT_MS : min(HTTP_TIMEOUT_MS, $budgetMs - $waitMs);
+        $response = executeHttpRequest($method, $url, $bearerToken, $data, $logBody, $timeoutMs);
         $status = $response['status'];
         $retryAfterMs = nonNegativeIntegerHeader($response['headers'], 'x-lognex-retry-after');
         if ($gate) {
@@ -522,7 +531,7 @@ function nonNegativeIntegerHeader(array $headers, string $name): ?int
     return $number === false ? null : $number;
 }
 
-function executeHttpRequest(string $method, string $url, string $bearerToken, mixed $data, bool $logBody): array
+function executeHttpRequest(string $method, string $url, string $bearerToken, mixed $data, bool $logBody, int $timeoutMs): array
 {
     $curl = curl_init($url);
     $headers = ['Authorization: Bearer ' . $bearerToken, 'Accept-Encoding: gzip'];
@@ -538,7 +547,7 @@ function executeHttpRequest(string $method, string $url, string $bearerToken, mi
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_MAXREDIRS => 10,
-        CURLOPT_TIMEOUT => 30,
+        CURLOPT_TIMEOUT_MS => $timeoutMs,
         CURLOPT_HTTPHEADER => $headers,
         CURLOPT_CUSTOMREQUEST => $method,
         CURLOPT_ENCODING => '',
@@ -652,6 +661,20 @@ class JsonApi
             'GET',
             cfg()->moyskladJsonApiEndpointUrl . "/entity/$entity/$objectId",
             $this->accessToken, rateLimited: true);
+    }
+
+    /**
+     * Сценарий отвечает МоемуСкладу не дольше 10 секунд, поэтому объект запрашивается один раз
+     * и с общим бюджетом времени на ожидание лимитера и сам запрос.
+     *
+     * @return array{ok: bool, status: int, body: mixed, raw: string, retries: int}
+     */
+    function getScenarioObject(string $entity, string $objectId): array
+    {
+        return makeHttpRequestDetailed(
+            'GET',
+            cfg()->moyskladJsonApiEndpointUrl . "/entity/$entity/$objectId",
+            $this->accessToken, rateLimited: true, maxRetries: 0, budgetMs: SCENARIO_OBJECT_BUDGET_MS);
     }
 
 }

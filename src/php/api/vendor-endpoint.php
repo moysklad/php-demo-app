@@ -8,6 +8,8 @@ require_once __DIR__ . '/../lib/lib.php';
 require_once __DIR__ . '/button.php';
 // [feature:loyalty] программа лояльности: реакция на Install/Uninstall.
 require_once __DIR__ . '/../loyalty/loyalty.inc.php';
+// [feature:scenario] действия в сценариях: обработчик POST .../scenario.
+require_once __DIR__ . '/../scenario/scenario.inc.php';
 
 $method = (string)($_SERVER['REQUEST_METHOD'] ?? '');
 $path = (string)($_SERVER['PATH_INFO'] ?? '');
@@ -116,6 +118,23 @@ switch ($method) {
             }
 
             log_message('INFO', "Button processed for appId=$appId on accountId=$accountId by user=" . print_r($data->user ?? null, true));
+        } elseif (($pp[2] ?? '') === 'scenario') {
+            // [feature:scenario] действие из сценария: МойСклад вызывает решение без участия пользователя
+            $requestBody = file_get_contents('php://input');
+
+            log_message('DEBUG', "Request body: " . print_r($requestBody, true));
+
+            $data = json_decode($requestBody, true);
+            $result = handleScenarioAction($appId, $accountId, is_array($data) ? $data : []);
+
+            http_response_code($result['status']);
+
+            if ($result['body'] !== null) {
+                header("Content-Type: application/json");
+                echo json_encode($result['body'], JSON_UNESCAPED_UNICODE);
+            }
+        } else {
+            http_response_code(404);
         }
 
         break;

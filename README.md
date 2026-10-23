@@ -6,6 +6,8 @@
 * Активация (с получением токена доступа к JSON API 1.2) и деактивация по Vendor API
 * Использование iframe для настройки решения администратором аккаунта с обновлением статуса в МоемСкладе
 * Основной iframe на React и UI Kit МоегоСклада (`@moysklad/uikit`) с вкладкой живых примеров компонентов
+* Окно чатов на том же протоколе контекста пользователя: состояние решения и журнал действий из сценариев
+* Обработка действий из сценариев МоегоСклада (модуль `src/php/scenario/`, см. [README](src/php/scenario/README.md))
 * Подключение программы лояльности (Loyalty API) и заглушка провайдера с внешним поиском покупателей
 * Получение контекста пользователя для iframe и виджетов по одноразовому токену из JS Widget SDK (отображение информации по пользователю, проверка прав администратора)
 * Примеры работы с PHP-сессией: обмен одноразового токена на `contextNonce` и повторное использование активного контекста в iframe/виджетах
@@ -38,7 +40,7 @@ Docker Compose:
 docker compose up --build
 ```
 
-Вместе с PHP поднимается сервис `frontend`: он ставит npm-зависимости и пересобирает основной iframe
+Вместе с PHP поднимается сервис `frontend`: он ставит npm-зависимости и пересобирает основной iframe и окно чатов
 из `frontend/` в `src/php/assets/entry` при каждом изменении исходников. В образ решения (`Dockerfile`)
 бандл собирается отдельной стадией на Node.js, поэтому для сборки образа Node.js на хосте не нужен.
 
@@ -68,10 +70,11 @@ php src/php/utils/generate-descriptor.php
 
 ## Основной iframe и UI Kit
 
-Основной iframe — React-приложение на [`@moysklad/uikit`](https://www.npmjs.com/package/@moysklad/uikit),
-React-библиотеке компонентов МоегоСклада. Исходники лежат в `frontend/`, сборка — esbuild (`frontend/build.mjs`).
-PHP отдает только HTML-оболочку (`entry/iframe.php`), контекст пользователя и данные страницы клиент получает
-через `entry/user-context.php`, настройки сохраняет в `utils/update-settings.php`. Виджеты и popup
+Основной iframe и окно чатов — React-приложения на [`@moysklad/uikit`](https://www.npmjs.com/package/@moysklad/uikit),
+React-библиотеке компонентов МоегоСклада. Исходники лежат в `frontend/`, сборка — esbuild (`frontend/build.mjs`),
+два бандла: `iframe` и `chat`. PHP отдает только HTML-оболочки (`entry/iframe.php`, `entry/iframe-chat.php`),
+контекст пользователя и данные страницы клиент получает через `entry/user-context.php`, настройки сохраняет
+в `utils/update-settings.php`. Виджеты и popup
 остаются на PHP-шаблонах с подключением JS Widget SDK с CDN.
 
 Вкладки основного iframe:
@@ -83,6 +86,7 @@ PHP отдает только HTML-оболочку (`entry/iframe.php`), кон
 * Компоненты импортируются точечно: `import { Button } from "@moysklad/uikit/components/Button"`. Импорт из корня пакета тянет в бандл всю библиотеку.
 * `@moysklad/uikit/colorVariables.css` подключается один раз — в `frontend/src/ui/theme.css`, до стилей компонентов.
 * Оверлеи кита рисуются внутри iframe: `position: fixed` считается от всего iframe. Полноценные диалоги — попапы через `sdk.showPopup()`, `Modal` кита — только для легких подтверждений, `Snackbar` и `Sidepage` внутри iframe не используйте.
+* Дропдауны кита ставят `autoFocus` на поле поиска, и браузер скроллит к нему страницу МоегоСклада. `frontend/src/ui/prevent-focus-scroll.ts` отключает прокрутку по фокусу для всей страницы; подключается первым импортом в обоих бандлах.
 
 UI Kit ссылается на шрифт `ALS Hauss` — коммерческий шрифт МоегоСклада, который нельзя распространять в составе
 демо-решения. Под этим именем подключен свободный [Onest](https://github.com/simpals/onest) (SIL OFL 1.1):
@@ -107,7 +111,9 @@ JSON API использует общую для PHP workers очередь в SQ
 Состояние очереди удаляется после 10 минут простоя при следующем обращении.
 Endpoint освобождает блокировку PHP-сессии перед вызовом API, чтобы серия выполнялась параллельно.
 
-Проверки (PHP с curl, pdo_sqlite и sodium; зависимости установлены через `composer install`):
+Проверки (PHP с curl, pdo_sqlite и sodium; зависимости установлены через `composer install`). Тесты — спецификация
+публичного контракта, а не цель покрытия: на контракт и важный отказ хватает одного-двух тестов, все они в одном
+`tests/run.php` (подробнее в [AGENTS.md](AGENTS.md)):
 
 ```bash
 php tests/run.php
@@ -127,6 +133,35 @@ Loyalty API, а не готовая бонусная система.
 Код собран в модуль `src/php/loyalty/` (вкладка — `frontend/src/loyalty/`), общий код он трогает только в помеченных
 местах: `grep -rn "feature:loyalty" src/ frontend/src/`. Платформенные особенности, список методов провайдера и
 порядок действий «как взять за основу» — в [src/php/loyalty/README.md](src/php/loyalty/README.md).
+
+## Окно чатов
+
+После перехода решения в статус `Activated` МойСклад показывает его окно в разделе «Чаты». В дескрипторе окно
+описано как `<iframe type="chat" sourceUrl=".../entry/iframe-chat.php" useContextKey="false">` с `<uses><user-context/></uses>`
+внутри `<iframes>`: контекст пользователя оно получает так же, как основной iframe, а другие сервисы хост-окна
+(попапы, навигация, стандартные диалоги) в чатах недоступны.
+
+Отличия от основного iframe, которые учитывает страница (`frontend/src/chat/`):
+* ширина не больше 1096px, горизонтального скролла быть не должно;
+* хост не подстраивает высоту окна: `autoResizeIframe()` не вызывается, страница скроллится сама;
+* окно видно всем пользователям аккаунта, поэтому на нем только чтение: состояние решения и журнал действий из сценариев.
+
+## Действия в сценариях
+
+Блок `<scenario>` дескриптора объявляет действия, которые администратор аккаунта может выбрать на странице
+сценариев МоегоСклада. При срабатывании сценария МойСклад вызывает `POST .../apps/{appId}/{accountId}/scenario`
+под service JWT и передает `actionName`, `actionType` (`ADD`, `MODIFY`, `CHANGE_STATUS`, `OVERDUE`,
+`CHANGE_PRODUCTION_STATE`), `objectId` и `objectType`.
+
+Демо-действия и ответы решения:
+* `log-event` — записывает срабатывание в журнал и отвечает `200`;
+* `fetch-object` — запрашивает объект через JSON API по `objectType`/`objectId`, сохраняет его название; если объект получить не удалось, отвечает `502`, и МойСклад повторит действие по политике retry;
+* `reject` — отвечает `400` с объектом `error`: сообщение `errorMessage` пользователь увидит в истории выполнения сценария.
+
+Ответить нужно быстрее 10 секунд: иначе МойСклад считает попытку неуспешной и повторяет запрос. Журнал последних
+срабатываний показывает окно чатов (`POST scenario/events.php`, авторизация по `contextNonce`). Код собран в модуль
+`src/php/scenario/`, места подключения к общему коду помечены `feature:scenario`; подробности в
+[src/php/scenario/README.md](src/php/scenario/README.md).
 
 ## Виджеты
 
@@ -198,9 +233,10 @@ Loyalty API, а не готовая бонусная система.
 * `composer.json`, `composer.lock`   - зависимости от сторонних библиотек, включая `firebase/php-jwt` для JWT
 * `config.php`                       - конфигурация решения
 * `docker-compose.yml`               - конфигурация для запуска в режиме разработки. Каталог `src/php` смонтирован в контейнер: изменения PHP-кода и данных в `src/php/data/` применяются без пересборки образа 
-* `frontend/`                        - исходники основного iframe на React и UI Kit, сборка в `src/php/assets/entry`
+* `frontend/`                        - исходники основного iframe и окна чатов на React и UI Kit, сборка в `src/php/assets/entry`
 * `entry/iframe.php`                 - HTML-оболочка основного iframe, подключает собранный бандл
-* `entry/iframe.inc.php`             - сборка данных основного iframe для активного контекста пользователя
+* `entry/iframe-chat.php`            - HTML-оболочка окна чатов, подключает бандл `chat`
+* `entry/iframe.inc.php`             - сборка данных основного iframe и окна чатов для активного контекста пользователя
 * `entry/user-context.php`           - обмен одноразового токена из JS Widget SDK на контекст пользователя и PHP-сессию
 * `entry/popup.php`                  - контроллер отображения popup
 * `entry/widget-customerorder.php`   - контроллер виджета для Заказа покупателя
@@ -215,6 +251,7 @@ Loyalty API, а не готовая бонусная система.
 * `lib/jwt-repo.php`                 - репозиторий для хранения и проверки одноразовости JWT (JTI)
 * `lib/rate-limit.php`               - общая для PHP workers очередь запросов JSON API по API и токену
 * `loyalty/`                         - модуль программы лояльности: провайдер Loyalty API, подключение, хранилище
+* `scenario/`                        - модуль действий в сценариях: обработчик `POST .../scenario`, журнал для окна чатов
 
 ### Файлы виджетов
 
@@ -237,10 +274,11 @@ Loyalty API, а не готовая бонусная система.
 ### Данные
 
 Серверное состояние установок решений хранится в `SQLite` через `PDO` (`pdo_sqlite`), по умолчанию файл `src/php/data/app.sqlite` (путь вычисляется в `appDatabasePath()`, переопределение — через `APP_DB_PATH`).
-При первом обращении backend автоматически создаёт файл БД и таблицы `account_application`, `jwt`, `loyalty_installation` и `http_rate_limit`.
+При первом обращении backend автоматически создаёт файл БД и таблицы `account_application`, `jwt`, `loyalty_installation`, `scenario_event` и `http_rate_limit`.
 В таблице хранится серверное состояние установки по ключу `(account_id, application_id)`:
 токен доступа к JSON API (зашифрован через `sodium_crypto_secretbox`), статус приложения и настройки (`infoMessage`, `store`).
 В `loyalty_installation` — подключение программы лояльности: токен провайдера (тоже зашифрован), режим внешнего поиска и признак того, что МойСклад принял настройки.
+В `scenario_event` — последние 50 срабатываний действий из сценариев на аккаунт: действие, тип события, объект и ответ решения.
 
 Для промышленного применения рекомендуется подключить внешнюю БД (например, PostgreSQL через PDO).
 
@@ -263,17 +301,17 @@ Loyalty API, а не готовая бонусная система.
 
 ### Работа с контекстом пользователя
 
-Основной iframe и виджеты используют протокол `user-context`: в дескрипторе у них указаны
+Основной iframe, окно чатов и виджеты используют протокол `user-context`: в дескрипторе у них указаны
 `<uses><user-context/></uses>` и атрибут `useContextKey="false"`, поэтому МойСклад не передает `contextKey` в URL.
 
 Последовательность работы:
-* Хост-окно открывает `entry/iframe.php` или `entry/widget-*.php` без параметров. Страница отдается без персональных данных.
+* Хост-окно открывает `entry/iframe.php`, `entry/iframe-chat.php` или `entry/widget-*.php` без параметров. Страница отдается без персональных данных.
 * После загрузки браузер вызывает `requestUserContextToken()` из `@moysklad/js-widget-sdk` (версия 1.3.0 и новее).
 * Одноразовый opaque-токен немедленно помещается в JSON body `{ "token": "..." }` запроса `POST entry/user-context.php`. Токен нигде не отображается, браузерная переменная очищается сразу после создания запроса.
 * Backend вызывает `POST {MOYSKLAD_VENDOR_API_URL}/context/user` под service JWT. Тело этого запроса в логи не пишется, поле `token` в логах маскируется.
 * Zeus возвращает `{accountId, userId, userUid, role}`. Известные роли: `admin`, `cashier`, `worker`, `individual`. Неизвестная роль не ломает обмен: пользователь считается не-админом.
-* В PHP-сессии сохраняется один активный пользовательский контекст: `uid`, `accountId`, `fio`, `isAdmin`, `contextNonce`, `createdAt`, `expiresAt`. В ответ UI получает контекст пользователя, `contextNonce` и, для основного iframe (`"page": "iframe"` в запросе), данные страницы. Токен не сохраняется и не возвращается.
-* Запросы из iframe/виджета к backend (`utils/update-settings.php`, `utils/get-object.php`, `utils/stores.php`) передают `contextNonce`.
+* В PHP-сессии сохраняется один активный пользовательский контекст: `uid`, `accountId`, `fio`, `isAdmin`, `contextNonce`, `createdAt`, `expiresAt`. В ответ UI получает контекст пользователя, `contextNonce` и данные страницы для основного iframe (`"page": "iframe"` в запросе) или окна чатов (`"page": "chat"`). Токен не сохраняется и не возвращается.
+* Запросы из iframe/виджета к backend (`utils/update-settings.php`, `utils/get-object.php`, `utils/stores.php`, `scenario/events.php`) передают `contextNonce`.
 * Backend принимает запрос только если `contextNonce` совпадает с активным контекстом текущей PHP-сессии.
 
 `isAdmin` равен `true` только для роли `admin`. ФИО в ответе Vendor API нет, поэтому в интерфейсе показывается `uid`.

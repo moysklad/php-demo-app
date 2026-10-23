@@ -2,6 +2,8 @@
 
 // [feature:loyalty] программа лояльности: данные вкладки приходят из модуля src/php/loyalty.
 require_once __DIR__ . '/../loyalty/loyalty.inc.php';
+// [feature:scenario] действия в сценариях: журнал показывает окно чатов.
+require_once __DIR__ . '/../scenario/scenario.inc.php';
 
 /**
  * Собирает данные основного iframe для активного контекста пользователя.
@@ -48,5 +50,28 @@ function buildIframePageData(array $context): array
         'status' => describeAppStatus($app),
         // [feature:loyalty] программа лояльности: на статус решения подключение не влияет.
         ...loyaltyIframePageData($accountId),
+    ];
+}
+
+/**
+ * Собирает данные окна чатов: пользователь, состояние решения и журнал действий из сценариев.
+ *
+ * @param array{accountId: string, isAdmin: bool, uid: string, fio: string, contextNonce: string} $context
+ */
+function buildChatPageData(array $context): array
+{
+    $accountId = (string)$context['accountId'];
+    $app = AppInstance::loadApp($accountId);
+
+    return [
+        'accountId' => $accountId,
+        'uid' => (string)$context['uid'],
+        'fio' => (string)$context['fio'],
+        'isAdmin' => (bool)$context['isAdmin'],
+        'contextNonce' => (string)$context['contextNonce'],
+        'appVersion' => appVersion(),
+        'status' => describeAppStatus($app),
+        // [feature:scenario] действия в сценариях
+        ...scenarioJournal($accountId),
     ];
 }

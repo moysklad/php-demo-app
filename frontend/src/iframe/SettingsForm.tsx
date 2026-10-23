@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { Banner } from "@moysklad/uikit/components/Banner";
 import { Button, ButtonVariants } from "@moysklad/uikit/components/Button";
 import { Input } from "@moysklad/uikit/components/Input";
@@ -27,6 +27,12 @@ export function SettingsForm({
 }) {
   const [infoMessage, setInfoMessage] = useState(saved.infoMessage);
   const [store, setStore] = useState(saved.store);
+
+  // Ответ на сохранение может прийти после переключения вкладок: поля догоняют сохраненные значения.
+  useEffect(() => {
+    setInfoMessage(saved.infoMessage);
+    setStore(saved.store);
+  }, [saved.infoMessage, saved.store]);
   const [isSaving, setSaving] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
 
