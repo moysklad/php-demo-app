@@ -35,6 +35,11 @@ $providerToken = is_string($body['providerToken'] ?? null) ? trim($body['provide
 // МойСклад не подтвердит настройки. Так решение не получит 401, если МойСклад уже переключился
 // на новый токен, и не сломает работающее подключение, если переключения не было.
 $installation = LoyaltyInstallation::load($appId, $accountId) ?? new LoyaltyInstallation($appId, $accountId);
+if (!$installation->canBeginUpdate($providerToken !== '' ? $providerToken : null)) {
+    replyConnectLoyalty(409, ['message' => 'Исход предыдущего подключения еще не известен: МойСклад мог принять отправленный тогда токен. '
+        . 'Повторите подключение с пустым полем токена, чтобы отправить его еще раз.']);
+}
+$pendingBefore = $installation->pendingSettings();
 $installation->beginUpdate($providerToken !== '' ? $providerToken : null, $externalSearch);
 $installation->persist();
 
@@ -46,7 +51,7 @@ if ($result['outcome'] === 'unknown') {
 }
 
 if ($result['outcome'] === 'rejected') {
-    $installation->discardUpdate();
+    $installation->discardUpdate($pendingBefore);
     $installation->persist();
     $code = $result['code'] !== null ? "Ошибка {$result['code']}: " : '';
     replyConnectLoyalty(502, ['message' => "Не удалось передать настройки Loyalty API. $code{$result['message']}"]);

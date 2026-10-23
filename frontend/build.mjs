@@ -1,15 +1,15 @@
 import * as esbuild from "esbuild";
 import { rm } from "node:fs/promises";
 
-// Бандл основного iframe: React, @moysklad/uikit и JS Widget SDK. PHP отдает только HTML-оболочку
-// (src/php/entry/iframe.php), поэтому результат кладется в docroot рядом с ней.
+// Бандлы основного iframe и окна чатов: React, @moysklad/uikit и JS Widget SDK. PHP отдает только
+// HTML-оболочки (src/php/entry/iframe.php, iframe-chat.php), поэтому результат кладется в docroot рядом с ними.
 const watch = process.argv.includes("--watch");
 const outdir = "../src/php/assets/entry";
 
 await rm(outdir, { recursive: true, force: true });
 
 const context = await esbuild.context({
-  entryPoints: { iframe: "src/iframe/main.tsx" },
+  entryPoints: { iframe: "src/iframe/main.tsx", chat: "src/chat/main.tsx" },
   bundle: true,
   splitting: true,
   format: "esm",

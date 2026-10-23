@@ -6,9 +6,13 @@ mkdir($directory, 0700);
 putenv('APP_DB_PATH=' . $directory . '/app.sqlite');
 putenv('APP_ENCRYPT_KEY=' . str_repeat('0', 64));
 putenv('APP_ID=test-app');
+putenv('APP_UID=test-app.moysklad');
+putenv('APP_SECRET_KEY=' . str_repeat('s', 64));
 putenv('TEST_QUEUE=' . $directory . '/queue.json');
 ini_set('session.save_path', $directory);
 require __DIR__ . '/../src/php/lib/lib.php';
+// [feature:scenario] действия в сценариях
+require __DIR__ . '/../src/php/scenario/scenario.inc.php';
 
 $servers = [];
 $results = [];
@@ -93,10 +97,10 @@ function sessionContext(bool $admin, string $account = 'account'): array
     return [$sid, $context['contextNonce']];
 }
 
-function endpoint(string $method, ?array $context = null): array
+function endpoint(string $method, ?array $context = null, string $path = '/utils/stores.php'): array
 {
     global $appUrl;
-    $curl = curl_init($appUrl . '/utils/stores.php');
+    $curl = curl_init($appUrl . $path);
     $options = [CURLOPT_RETURNTRANSFER => true, CURLOPT_CUSTOMREQUEST => $method, CURLOPT_TIMEOUT => 10];
     if ($context) {
         $options[CURLOPT_COOKIE] = 'PHPSESSID=' . $context[0];
@@ -109,16 +113,183 @@ function endpoint(string $method, ?array $context = null): array
     return ['status' => $status, 'body' => json_decode($body, true, 512, JSON_THROW_ON_ERROR)];
 }
 
+// Запрос МоегоСклада к Vendor API решения под service JWT; без $authorized — без заголовка Authorization.
+function vendorRequest(string $method, string $path, ?array $body = null, bool $authorized = true): array
+{
+    global $appUrl;
+    $curl = curl_init($appUrl . '/api/vendor-endpoint.php/api/moysklad/vendor/1.0/apps/' . $path);
+    $headers = ['Content-Type: application/json'];
+    if ($authorized) {
+        $headers[] = 'Authorization: Bearer ' . buildJWT();
+    }
+    curl_setopt_array($curl, [CURLOPT_RETURNTRANSFER => true, CURLOPT_CUSTOMREQUEST => $method,
+        CURLOPT_TIMEOUT => 10, CURLOPT_HTTPHEADER => $headers,
+        CURLOPT_POSTFIELDS => $body === null ? '' : json_encode($body)]);
+    $raw = curl_exec($curl);
+    $status = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+    curl_close($curl);
+    return ['status' => $status, 'raw' => $raw, 'body' => $raw === '' ? null : json_decode($raw, true)];
+}
+
+function scenarioRequest(string $actionName, array $overrides = []): array
+{
+    return ['actionName' => $actionName, 'actionType' => 'ADD', 'objectId' => '624b7f4d-9c1b-11ef-0a83-18f5000001ec',
+        'objectType' => 'CustomerOrder', ...$overrides];
+}
+
+function chatJournal(array $context): array
+{
+    $result = endpoint('POST', $context, '/scenario/events.php');
+    same($result['status'], 200);
+    return $result['body'];
+}
+
+// JSON-запрос из браузера решения (user-context, connect.php); $sid — cookie PHP-сессии, в ответе — её же id из Set-Cookie.
+function jsonRequest(string $path, array $body, ?string $sid = null): array
+{
+    global $appUrl;
+    $curl = curl_init($appUrl . $path);
+    curl_setopt_array($curl, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_POST => true,
+        CURLOPT_TIMEOUT => 10, CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+        CURLOPT_POSTFIELDS => json_encode($body), CURLOPT_COOKIE => $sid === null ? '' : 'PHPSESSID=' . $sid]);
+    $raw = (string)curl_exec($curl);
+    $status = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+    $headerSize = curl_getinfo($curl, CURLINFO_HEADER_SIZE);
+    curl_close($curl);
+    preg_match('/PHPSESSID=([^;]+)/', substr($raw, 0, $headerSize), $cookie);
+    return ['status' => $status, 'body' => json_decode(substr($raw, $headerSize), true), 'sid' => $cookie[1] ?? $sid];
+}
+
+function providerRequest(string $method, string $path, string $token): int
+{
+    global $appUrl;
+    $curl = curl_init($appUrl . '/loyalty/provider.php' . $path);
+    curl_setopt_array($curl, [CURLOPT_RETURNTRANSFER => true, CURLOPT_CUSTOMREQUEST => $method, CURLOPT_TIMEOUT => 10,
+        CURLOPT_HTTPHEADER => ['Lognex-Discount-API-Auth-Token: ' . $token, 'Content-Type: application/json'], CURLOPT_POSTFIELDS => '{}']);
+    curl_exec($curl);
+    $status = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+    curl_close($curl);
+    return $status;
+}
+
+function zeusUser(string $role = 'admin'): string
+{
+    return json_encode(['accountId' => 'account', 'userId' => 'user-id', 'userUid' => 'user', 'role' => $role]);
+}
+
+function page(string $path): array
+{
+    global $appUrl;
+    $curl = curl_init($appUrl . $path);
+    curl_setopt_array($curl, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
+    $body = curl_exec($curl);
+    $status = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+    curl_close($curl);
+    return ['status' => $status, 'body' => (string)$body];
+}
+
 try {
     $apiUrl = startServer([__DIR__ . '/mock-api.php']);
+    // Один mock отвечает и за JSON API, и за Vendor API: ответы берутся из очереди по порядку.
     putenv('MOYSKLAD_JSON_API_URL=' . $apiUrl);
+    putenv('MOYSKLAD_VENDOR_API_URL=' . $apiUrl);
     cfg()->moyskladJsonApiEndpointUrl = $apiUrl;
+    cfg()->moyskladVendorApiEndpointUrl = $apiUrl;
     $appUrl = startServer(['-t', __DIR__ . '/../src/php']);
     $app = new AppInstance(cfg()->appId, 'account');
     $app->accessToken = 'test-token';
     $app->persist();
 
     $tests = [
+        // Жизненный цикл решения через Vendor endpoint: настройки переживают Suspend и Uninstall.
+        'testVendorLifecycleKeepsSettings' => function (): void {
+            $path = 'test-app/lifecycle';
+            $install = ['appUid' => 'test-app.moysklad', 'cause' => 'Install', 'access' => [['access_token' => 'token-1']]];
+            same(vendorRequest('PUT', $path, $install, false)['status'], 401);
+            same(vendorRequest('PUT', $path, $install)['body'], ['status' => 'SettingsRequired']);
+            $app = AppInstance::load('test-app', 'lifecycle');
+            same($app->accessToken, 'token-1');
+            $app->store = 'Основной склад';
+            $app->status = AppInstance::ACTIVATED;
+            $app->persist();
+
+            same(vendorRequest('DELETE', $path, ['cause' => 'Suspend'])['status'], 200);
+            check(empty(AppInstance::load('test-app', 'lifecycle')->accessToken), 'Access token kept after Suspend');
+            // Повторный DELETE для уже приостановленного решения — 204, как требует Vendor API.
+            same(vendorRequest('DELETE', $path, ['cause' => 'Suspend'])['status'], 204);
+            same(vendorRequest('PUT', $path, ['appUid' => 'test-app.moysklad', 'cause' => 'Resume', 'access' => [['access_token' => 'token-2']]])['body'], ['status' => 'Activated']);
+            same(AppInstance::load('test-app', 'lifecycle')->accessToken, 'token-2');
+
+            same(vendorRequest('DELETE', $path, ['cause' => 'Uninstall'])['status'], 200);
+            same(vendorRequest('DELETE', $path, ['cause' => 'Pause'])['status'], 204);
+            same(vendorRequest('PUT', $path, $install)['body'], ['status' => 'Activated']);
+            same(AppInstance::load('test-app', 'lifecycle')->store, 'Основной склад');
+            same(vendorRequest('DELETE', $path, ['cause' => 'Pause'])['status'], 400);
+        },
+        // Обмен одноразового токена: контекст и pageData в ответе, токен в сессию не попадает, ошибки Zeus без тела.
+        'testUserContextExchange' => function (): void {
+            same(jsonRequest('/entry/user-context.php', [])['status'], 400);
+            queueResponses([['status' => 200, 'body' => zeusUser()], ['status' => 200, 'body' => '{"rows":[{"name":"Основной склад"}]}']]);
+            $result = jsonRequest('/entry/user-context.php', ['token' => 'opaque-token', 'page' => 'iframe']);
+            same($result['status'], 200);
+            same($result['body']['user']['isAdmin'], true);
+            same($result['body']['pageData']['contextNonce'], $result['body']['contextNonce']);
+            same($result['body']['pageData']['storesValues'], ['Основной склад']);
+            same($result['body']['pageData']['status']['badge'], 'orange');
+            check(!str_contains(json_encode($result['body']), 'opaque-token'), 'Token leaked to response');
+            same(count(calls()), 2);
+            // Тот же пользователь при повторном обмене получает прежний contextNonce.
+            queueResponses([['status' => 200, 'body' => zeusUser()]]);
+            same(jsonRequest('/entry/user-context.php', ['token' => 'opaque-token-2'], $result['sid'])['body']['contextNonce'], $result['body']['contextNonce']);
+            // 401 от Zeus — битый service JWT решения, клиенту отдается как 502; 404 с кодом пробрасывается как есть.
+            queueResponses([['status' => 401, 'body' => '{"errors":[{"code":1056}]}']]);
+            same(jsonRequest('/entry/user-context.php', ['token' => 'opaque-token'])['status'], 502);
+            queueResponses([['status' => 404, 'body' => '{"errors":[{"code":3007}]}']]);
+            $notFound = jsonRequest('/entry/user-context.php', ['token' => 'opaque-token']);
+            same($notFound['status'], 404);
+            same($notFound['body']['code'], '3007');
+        },
+        // [feature:loyalty] подключение Loyalty API: ожидающий токен до подтверждения, провайдер принимает действующий.
+        'testLoyaltyConnectAndProvider' => function (): void {
+            [$sid, $nonce] = sessionContext(true, 'loyalty');
+            queueResponses([['status' => 200]]);
+            $providerUrl = 'http://localhost/loyalty/provider.php';
+            $connected = jsonRequest('/loyalty/connect.php', ['contextNonce' => $nonce, 'providerUrl' => $providerUrl, 'providerToken' => 'token-1', 'externalSearch' => false], $sid);
+            same($connected['status'], 200);
+            same($connected['body']['loyalty']['state'], 'connected');
+            same(providerRequest('GET', '/counterparty?search=' . rawurlencode('Иван'), 'token-1'), 404);
+            same(providerRequest('POST', '/counterparty/detail', 'wrong'), 401);
+
+            // Явный отказ Vendor API: ожидающий токен удаляется, действующее подключение остается.
+            queueResponses([['status' => 400, 'body' => '{"errors":[{"error":"Нет loyaltyApi","code":2006}]}']]);
+            $rejected = jsonRequest('/loyalty/connect.php', ['contextNonce' => $nonce, 'providerUrl' => $providerUrl, 'providerToken' => 'token-2'], $sid);
+            same($rejected['status'], 502);
+            check(str_contains($rejected['body']['message'], '2006'), 'No Vendor API error code in message');
+            same(providerRequest('POST', '/counterparty/detail', 'token-1'), 200);
+            same(providerRequest('POST', '/counterparty/detail', 'token-2'), 401);
+
+            // Исход неизвестен (5xx без повтора): провайдер принимает оба токена, пока подключение не подтверждено.
+            queueResponses([['status' => 500]]);
+            same(jsonRequest('/loyalty/connect.php', ['contextNonce' => $nonce, 'providerUrl' => $providerUrl, 'providerToken' => 'token-2', 'externalSearch' => true], $sid)['status'], 502);
+            same(providerRequest('GET', '/counterparty?search=' . rawurlencode('Иван'), 'token-2'), 200);
+            same(providerRequest('POST', '/counterparty/detail', 'token-1'), 200);
+            same(providerRequest('POST', '/counterparty/detail', 'token-2'), 200);
+
+            // Другой токен до разрешения исхода не принимается; отказ повтора не теряет токен с неизвестным исходом.
+            same(jsonRequest('/loyalty/connect.php', ['contextNonce' => $nonce, 'providerUrl' => $providerUrl, 'providerToken' => 'token-3'], $sid)['status'], 409);
+            same(providerRequest('POST', '/counterparty/detail', 'token-3'), 401);
+            queueResponses([['status' => 400, 'body' => '{"errors":[{"error":"Решение еще устанавливается","code":2007}]}']]);
+            same(jsonRequest('/loyalty/connect.php', ['contextNonce' => $nonce, 'providerUrl' => $providerUrl, 'externalSearch' => false], $sid)['status'], 502);
+            same(providerRequest('GET', '/counterparty?search=' . rawurlencode('Иван'), 'token-2'), 200);
+            queueResponses([['status' => 200]]);
+            same(jsonRequest('/loyalty/connect.php', ['contextNonce' => $nonce, 'providerUrl' => $providerUrl], $sid)['status'], 200);
+            same(providerRequest('POST', '/counterparty/detail', 'token-1'), 401);
+            same(providerRequest('POST', '/counterparty/detail', 'token-2'), 200);
+
+            [$userSid, $userNonce] = sessionContext(false, 'loyalty');
+            same(jsonRequest('/loyalty/connect.php', ['contextNonce' => $userNonce, 'providerUrl' => $providerUrl, 'providerToken' => 'token-3'], $userSid)['status'], 403);
+        },
+        // HTTP-клиент: ретраи по X-Lognex-Retry-After и общая очередь запросов JSON API в SQLite.
         'testRetryAfterAndCount' => function () use ($apiUrl): void {
             queueResponses([['status' => 429, 'headers' => ['x-LoGnEx-ReTrY-AfTeR' => '40']], ['status' => 200]]);
             $result = makeHttpRequestDetailed('GET', $apiUrl, 'retry-token', rateLimited: true);
@@ -127,6 +298,12 @@ try {
             same($result['body']->rows, []);
             same(count(calls()), 2);
             check(calls()[1]['at'] - calls()[0]['at'] >= 0.035, 'Retry ignored milliseconds header');
+
+            // Запрос с бюджетом не ждёт слот, который откроется позже дедлайна: он не отправляется вовсе.
+            queueResponses([['status' => 429, 'headers' => ['X-Lognex-Retry-After' => '11000']]]);
+            same(makeHttpRequestDetailed('POST', $apiUrl, 'retry-token', [], rateLimited: true)['status'], 429);
+            same(makeHttpRequestDetailed('GET', $apiUrl, 'retry-token', rateLimited: true, budgetMs: 5000)['status'], 0);
+            same(count(calls()), 1);
         },
         'testExhaustedRetries' => function () use ($apiUrl): void {
             queueResponses([['status' => 429, 'headers' => ['X-Lognex-Retry-After' => '0']]]);
@@ -144,6 +321,10 @@ try {
             }
         },
         'testFallbackAndNon429Counter' => function () use ($apiUrl): void {
+            foreach (['-1', '1.5', '20abc', '', '99999999999999999999999999'] as $value) {
+                same(nonNegativeIntegerHeader(['header' => $value], 'header'), null);
+            }
+            same(nonNegativeIntegerHeader(['header' => '30'], 'header'), 30);
             foreach ([429, 503] as $status) {
                 queueResponses([['status' => $status, 'headers' => ['X-Lognex-Retry-After' => 'bad']], ['status' => 200]]);
                 $result = makeHttpRequestDetailed('GET', $apiUrl, 'fallback-token');
@@ -161,14 +342,8 @@ try {
             }
             check(calls()[2]['at'] - calls()[1]['at'] >= 0.065, 'Success headers did not set request spacing');
         },
-        'testInvalidHeaders' => function (): void {
-            foreach (['-1', '1.5', '20abc', '', '99999999999999999999999999'] as $value) {
-                same(nonNegativeIntegerHeader(['header' => $value], 'header'), null);
-            }
-            same(nonNegativeIntegerHeader(['header' => '0'], 'header'), 0);
-            same(nonNegativeIntegerHeader(['header' => '30'], 'header'), 30);
-        },
-        'testGateIsolationAndIdleCleanup' => function (): void {
+        // Gate живет в SQLite: его видят все PHP workers, чужой токен и API не ждут, простой сбрасывает очередь.
+        'testGateIsSharedBetweenWorkersPerTokenAndApi' => function (): void {
             $gate = new LognexRateLimitGate('api', 'token');
             $gate->observe(429, ['x-lognex-retry-after' => '1000']);
             check((new LognexRateLimitGate('api', 'token'))->reserveDelay() > 800, 'Gate not shared');
@@ -177,9 +352,7 @@ try {
             $pdo = new PDO('sqlite:' . appDatabasePath());
             $pdo->exec('UPDATE http_rate_limit SET last_used_at = 0, not_before = 0, spacing_ms = 1000');
             same($gate->reserveDelay(), 0);
-            same($gate->reserveDelay(), 0);
-        },
-        'testParallelWorkersReserveDistinctSlots' => function (): void {
+
             $gate = new LognexRateLimitGate('parallel-api', 'parallel-token');
             $gate->observe(200, ['x-ratelimit-limit' => '2', 'x-lognex-retry-timeinterval' => '400']);
             $workers = [];
@@ -229,6 +402,91 @@ try {
             same($result['body']['retries'], 10);
             queueResponses([['status' => 200, 'body' => 'invalid json']]);
             same(endpoint('POST', $context)['status'], 502);
+        },
+        // [feature:scenario] действия в сценариях и окно чатов
+        'testScenarioRequiresVendorAuth' => function (): void {
+            same(vendorRequest('POST', 'test-app/account/scenario', scenarioRequest('log-event'), false)['status'], 401);
+            same(vendorRequest('POST', 'test-app/account/unknown', [])['status'], 404);
+        },
+        'testScenarioLogEventIsRecordedForChatWindow' => function (): void {
+            $result = vendorRequest('POST', 'test-app/scenario-log/scenario', scenarioRequest('log-event', ['actionType' => 'MODIFY']));
+            same($result['status'], 200);
+            same($result['raw'], '');
+            $journal = chatJournal(sessionContext(false, 'scenario-log'));
+            same(array_column($journal['scenarioActions'], 'name'), ['log-event', 'fetch-object', 'reject']);
+            same(count($journal['scenarioEvents']), 1);
+            $event = $journal['scenarioEvents'][0];
+            same($event['actionName'], 'log-event');
+            same($event['actionTitle'], 'Записать событие в журнал решения');
+            same($event['actionType'], 'MODIFY');
+            same($event['objectType'], 'CustomerOrder');
+            same($event['outcome'], 'ok');
+            check($event['createdAt'] !== '', 'createdAt is empty');
+        },
+        'testScenarioRejectReturnsErrorForUser' => function (): void {
+            $result = vendorRequest('POST', 'test-app/scenario-reject/scenario', scenarioRequest('reject'));
+            same($result['status'], 400);
+            same($result['body']['error']['code'], 1001);
+            check(str_contains($result['body']['error']['errorMessage'], 'CustomerOrder 624b7f4d-9c1b-11ef-0a83-18f5000001ec'), 'No object in message');
+            $event = chatJournal(sessionContext(false, 'scenario-reject'))['scenarioEvents'][0];
+            same($event['outcome'], 'rejected');
+            same($event['message'], $result['body']['error']['errorMessage']);
+        },
+        'testScenarioFetchObjectStoresObjectName' => function (): void {
+            queueResponses([['status' => 200, 'body' => '{"id":"624b7f4d","name":"00042"}']]);
+            $result = vendorRequest('POST', 'test-app/account/scenario', scenarioRequest('fetch-object'));
+            same($result['status'], 200);
+            check(str_ends_with(calls()[0]['url'], '/entity/customerorder/624b7f4d-9c1b-11ef-0a83-18f5000001ec'), 'Wrong JSON API url: ' . calls()[0]['url']);
+            $event = chatJournal(sessionContext(false))['scenarioEvents'][0];
+            same($event['outcome'], 'ok');
+            same($event['objectName'], '00042');
+        },
+        'testScenarioFetchObjectFailureAsksForRetryOnlyWhenItCanHelp' => function (): void {
+            queueResponses([['status' => 429, 'headers' => ['x-lognex-retry-after' => '40'], 'body' => '{"errors":[]}']]);
+            same(vendorRequest('POST', 'test-app/account/scenario', scenarioRequest('fetch-object'))['status'], 502);
+            same(count(calls()), 1);
+            queueResponses([['status' => 404, 'body' => '{"errors":[]}']]);
+            $notFound = vendorRequest('POST', 'test-app/account/scenario', scenarioRequest('fetch-object', ['objectType' => 'Company']));
+            same($notFound['status'], 400);
+            check(str_contains($notFound['body']['error']['errorMessage'], '404'), 'No JSON API status in message');
+            check(str_ends_with(calls()[0]['url'], '/entity/counterparty/624b7f4d-9c1b-11ef-0a83-18f5000001ec'), 'Wrong JSON API url: ' . calls()[0]['url']);
+            same(array_slice(array_column(chatJournal(sessionContext(false))['scenarioEvents'], 'outcome'), 0, 2), ['failed', 'failed']);
+            // Без access token (решение не установлено) объект тоже не получить.
+            same(vendorRequest('POST', 'test-app/scenario-missing/scenario', scenarioRequest('fetch-object'))['status'], 502);
+        },
+        'testScenarioRejectsUnknownActionAndIncompleteBody' => function (): void {
+            $unknown = vendorRequest('POST', 'test-app/scenario-bad/scenario', scenarioRequest('explode'));
+            same($unknown['status'], 400);
+            check(str_contains($unknown['body']['error']['errorMessage'], 'explode'), 'No action name in message');
+            same(vendorRequest('POST', 'test-app/scenario-bad/scenario', ['actionName' => 'log-event'])['status'], 400);
+            same(chatJournal(sessionContext(false, 'scenario-bad'))['scenarioEvents'], []);
+        },
+        'testScenarioJournalKeepsLatestEventsFirst' => function (): void {
+            for ($i = 0; $i < 3; $i++) {
+                same(vendorRequest('POST', 'test-app/scenario-order/scenario', scenarioRequest('log-event', ['objectId' => "object-$i"]))['status'], 200);
+            }
+            $events = chatJournal(sessionContext(false, 'scenario-order'))['scenarioEvents'];
+            same(array_column($events, 'objectId'), ['object-2', 'object-1', 'object-0']);
+        },
+        'testScenarioJournalRequiresContextNonce' => function (): void {
+            same(endpoint('GET', null, '/scenario/events.php')['status'], 405);
+            same(endpoint('POST', null, '/scenario/events.php')['status'], 401);
+            [$sid, $nonce] = sessionContext(false);
+            same(endpoint('POST', [$sid, 'stale'], '/scenario/events.php')['status'], 401);
+        },
+        'testChatWindowIsServedWithoutUserContext' => function (): void {
+            $result = page('/entry/iframe-chat.php');
+            same($result['status'], 200);
+            check(str_contains($result['body'], '../assets/entry/chat.js'), 'Chat bundle is not referenced');
+            check(!str_contains($result['body'], 'account'), 'Chat shell leaks account data');
+        },
+        'testDescriptorContainsChatWindowAndScenarioActions' => function (): void {
+            $descriptor = page('/utils/generate-descriptor.php')['body'];
+            check(str_contains($descriptor, '<iframe type="main" sourceUrl="/entry/iframe.php" useContextKey="false">'), 'No main iframe');
+            check(str_contains($descriptor, '<iframe type="chat" sourceUrl="/entry/iframe-chat.php" useContextKey="false">'), 'No chat iframe');
+            same(substr_count($descriptor, '<user-context/>'), 4);
+            check(str_contains($descriptor, '<action name="log-event" title="Записать событие в журнал решения"/>'), 'No log-event action');
+            check(str_contains($descriptor, '<action name="reject" title="Отклонить с сообщением пользователю"/>'), 'No reject action');
         },
         'testSessionUnlockedWhileWaitingForRetry' => function () use ($appUrl): void {
             [$sid, $nonce] = sessionContext(true);

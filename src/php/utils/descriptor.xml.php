@@ -1,13 +1,18 @@
 <ServerApplication xmlns="https://apps-api.moysklad.ru/xml/ns/appstore/app/v2"
                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                    xsi:schemaLocation="https://apps-api.moysklad.ru/xml/ns/appstore/app/v2 https://apps-api.moysklad.ru/xml/ns/appstore/app/v2/application-v2.xsd">
-    <iframe useContextKey="false">
-        <sourceUrl><?= cfg()->appBaseUrl ?>/entry/iframe.php</sourceUrl>
-        <expand>true</expand>
-        <uses>
-            <user-context/>
-        </uses>
-    </iframe>
+    <iframes>
+        <iframe type="main" sourceUrl="<?= cfg()->appBaseUrl ?>/entry/iframe.php" useContextKey="false">
+            <uses>
+                <user-context/>
+            </uses>
+        </iframe>
+        <iframe type="chat" sourceUrl="<?= cfg()->appBaseUrl ?>/entry/iframe-chat.php" useContextKey="false">
+            <uses>
+                <user-context/>
+            </uses>
+        </iframe>
+    </iframes>
     <vendorApi>
         <endpointBase><?= cfg()->appBaseUrl ?>/api/vendor-endpoint.php</endpointBase>
     </vendorApi>
@@ -90,4 +95,11 @@
             </locations>
         </button>
     </buttons>
+    <!-- [feature:scenario] действия решения в сценариях МоегоСклада, список общий с обработчиком -->
+    <scenario>
+<?php require_once __DIR__ . '/../scenario/scenario.inc.php'; ?>
+<?php foreach (SCENARIO_ACTIONS as $name => $title): ?>
+        <action name="<?= escHtml($name) ?>" title="<?= escHtml($title) ?>"/>
+<?php endforeach; ?>
+    </scenario>
 </ServerApplication>

@@ -1,7 +1,7 @@
 {
   "name": "php-demo-app-frontend",
   "private": true,
-  "description": "Основной iframe php-demo-app на React и @moysklad/uikit",
+  "description": "Основной iframe и окно чатов php-demo-app на React и @moysklad/uikit",
   "type": "module",
   "scripts": {
     "build": "node build.mjs",

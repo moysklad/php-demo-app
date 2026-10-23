@@ -1,21 +1,28 @@
-import { useEffect, useState } from "react";
+import { type ReactElement, useEffect, useState } from "react";
 import { Banner } from "@moysklad/uikit/components/Banner";
 import { Spinner, SpinnerSize } from "@moysklad/uikit/components/Spinner";
 import { Text } from "@moysklad/uikit/components/Text";
 import { VStack } from "@moysklad/uikit/components/VStack";
 import { sdk } from "../ui/sdk";
-import type { IframePageData } from "./page-data";
-import { IframePage } from "./IframePage";
 
-type UserContextResponse = {
-  pageData?: IframePageData;
+type UserContextResponse<TPageData> = {
+  pageData?: TPageData;
   message?: string;
   code?: string;
 };
 
-/** Основной iframe: браузер запрашивает одноразовый токен через SDK и поднимает сессию на backend. */
-export function ContextBootstrap() {
-  const [pageData, setPageData] = useState<IframePageData | null>(null);
+type ContextBootstrapProps<TPageData> = {
+  /** Какую страницу собирает backend в pageData: "iframe" — основной iframe, "chat" — окно чатов. */
+  page: "iframe" | "chat";
+  render: (pageData: TPageData) => ReactElement;
+};
+
+/**
+ * Окна решения на протоколе user-context: браузер запрашивает одноразовый токен через SDK,
+ * backend обменивает его на контекст пользователя и возвращает данные страницы.
+ */
+export function ContextBootstrap<TPageData>({ page, render }: ContextBootstrapProps<TPageData>) {
+  const [pageData, setPageData] = useState<TPageData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,14 +43,14 @@ export function ContextBootstrap() {
     const request = new Request("user-context.php", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, page: "iframe" }),
+      body: JSON.stringify({ token, page }),
       credentials: "same-origin"
     });
     token = null;
 
     try {
       const response = await fetch(request);
-      const payload = (await response.json().catch(() => null)) as UserContextResponse | null;
+      const payload = (await response.json().catch(() => null)) as UserContextResponse<TPageData> | null;
 
       if (!response.ok || !payload?.pageData) {
         const code = payload?.code ? ` (код ${payload.code})` : "";
@@ -58,7 +65,7 @@ export function ContextBootstrap() {
   }
 
   if (pageData) {
-    return <IframePage data={pageData} />;
+    return render(pageData);
   }
 
   if (error) {
