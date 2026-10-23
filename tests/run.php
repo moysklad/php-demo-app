@@ -181,11 +181,13 @@ function page(string $path): array
 {
     global $appUrl;
     $curl = curl_init($appUrl . $path);
-    curl_setopt_array($curl, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
-    $body = curl_exec($curl);
+    curl_setopt_array($curl, [CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_TIMEOUT => 10]);
+    $raw = (string)curl_exec($curl);
     $status = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+    $headerSize = curl_getinfo($curl, CURLINFO_HEADER_SIZE);
     curl_close($curl);
-    return ['status' => $status, 'body' => (string)$body];
+    preg_match('/PHPSESSID=([^;]+)/', substr($raw, 0, $headerSize), $cookie);
+    return ['status' => $status, 'body' => substr($raw, $headerSize), 'sid' => $cookie[1] ?? null];
 }
 
 try {
@@ -480,10 +482,38 @@ try {
             check(str_contains($result['body'], '../assets/entry/chat.js'), 'Chat bundle is not referenced');
             check(!str_contains($result['body'], 'account'), 'Chat shell leaks account data');
         },
+        // Мобильное окно: contextKey из URL меняется на PHP-сессию, без ключа или с протухшим ключом — 401 с пояснением.
+        'testMobileWindowExchangesContextKey' => function (): void {
+            $employee = ['uid' => 'admin@demo', 'shortFio' => 'Иванов И.', 'accountId' => 'account',
+                'permissions' => ['admin' => ['view' => 'ALL']]];
+            queueResponses([['status' => 200, 'body' => json_encode($employee)]]);
+            $result = page('/entry/iframe-mobile.php?contextKey=context-key-1');
+            same($result['status'], 200);
+            same(array_map(fn(array $call): string => $call['method'] . ' ' . $call['url'], calls()), ['POST /context/context-key-1']);
+            check(!str_contains($result['body'], 'context-key-1'), 'contextKey leaked to page');
+            check(str_contains($result['body'], 'admin@demo (Иванов И.)'), 'No user in page');
+            check(str_contains($result['body'], 'администратор аккаунта'), 'Admin permission ignored');
+            check(str_contains($result['body'], '../assets/mobile/iframe-mobile.js'), 'Mobile script is not referenced');
+            check(preg_match('/name="contextNonce" value="([^"]+)"/', $result['body'], $nonce) === 1, 'No contextNonce in page');
+            same(endpoint('POST', [$result['sid'], $nonce[1]], '/scenario/events.php')['status'], 200);
+
+            queueResponses([['status' => 404, 'body' => '{"errors":[{"code":3007}]}']]);
+            $expired = page('/entry/iframe-mobile.php?contextKey=expired-key');
+            same($expired['status'], 401);
+            check(str_contains($expired['body'], 'откройте его заново из мобильного приложения'), 'No expired key hint');
+            check(!str_contains($expired['body'], 'contextNonce'), 'contextNonce on error page');
+
+            queueResponses([['status' => 200]]);
+            $missing = page('/entry/iframe-mobile.php');
+            same($missing['status'], 401);
+            check(str_contains($missing['body'], 'нет параметра contextKey'), 'No missing key hint');
+            same(calls(), []);
+        },
         'testDescriptorContainsChatWindowAndScenarioActions' => function (): void {
             $descriptor = page('/utils/generate-descriptor.php')['body'];
             check(str_contains($descriptor, '<iframe type="main" sourceUrl="/entry/iframe.php" useContextKey="false">'), 'No main iframe');
             check(str_contains($descriptor, '<iframe type="chat" sourceUrl="/entry/iframe-chat.php" useContextKey="false">'), 'No chat iframe');
+            check(str_contains($descriptor, '<iframe type="mobile" sourceUrl="/entry/iframe-mobile.php"/>'), 'No mobile iframe');
             same(substr_count($descriptor, '<user-context/>'), 4);
             check(str_contains($descriptor, '<action name="log-event" title="Записать событие в журнал решения"/>'), 'No log-event action');
             check(str_contains($descriptor, '<action name="reject" title="Отклонить с сообщением пользователю"/>'), 'No reject action');

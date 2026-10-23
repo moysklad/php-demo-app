@@ -386,6 +386,15 @@ class VendorApi
         return ['ok' => true, 'status' => $response['status'], 'code' => null, 'user' => $user];
     }
 
+    /**
+     * Мобильное окно: хост не поддерживает user-context, сотрудник берется по contextKey из URL.
+     * Ответ — сотрудник МоегоСклада (uid, shortFio, accountId, permissions) или null, если ключ устарел.
+     */
+    function context(string $contextKey): mixed
+    {
+        return $this->request('POST', '/context/' . rawurlencode($contextKey));
+    }
+
     function updateAppStatus(string $appId, string $accountId, string $status): mixed
     {
         return $this->request('PUT',

@@ -12,6 +12,7 @@
                 <user-context/>
             </uses>
         </iframe>
+        <iframe type="mobile" sourceUrl="<?= cfg()->appBaseUrl ?>/entry/iframe-mobile.php"/>
     </iframes>
     <vendorApi>
         <endpointBase><?= cfg()->appBaseUrl ?>/api/vendor-endpoint.php</endpointBase>
