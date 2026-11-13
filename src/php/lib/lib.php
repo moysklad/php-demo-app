@@ -111,11 +111,12 @@ function ensureSessionStarted(): void
         return;
     }
 
+    $cookieSecure = getenv('SESSION_COOKIE_SECURE');
     $sessionOptions = [
         'gc_maxlifetime' => USER_CONTEXT_SESSION_TTL_SECONDS,
         'cookie_httponly' => true,
-        'cookie_samesite' => 'None',
-        'cookie_secure' => true,
+        'cookie_samesite' => getenv('SESSION_COOKIE_SAME_SITE') ?: 'None',
+        'cookie_secure' => $cookieSecure === false ? true : filter_var($cookieSecure, FILTER_VALIDATE_BOOLEAN),
     ];
 
     session_start($sessionOptions);
