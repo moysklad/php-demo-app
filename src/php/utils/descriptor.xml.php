@@ -15,7 +15,7 @@
         <iframe type="mobile" sourceUrl="<?= cfg()->appBaseUrl ?>/entry/iframe-mobile.php"/>
     </iframes>
     <vendorApi>
-        <endpointBase><?= cfg()->appBaseUrl ?>/api/vendor-endpoint.php</endpointBase>
+        <endpointBase><?= escHtml($vendorEndpointUrl ?? (cfg()->appBaseUrl . '/api/vendor-endpoint.php')) ?></endpointBase>
     </vendorApi>
     <!-- [feature:loyalty] пропуск на PUT .../loyalty в Vendor API, сам по себе ничего не включает -->
     <loyaltyApi/>

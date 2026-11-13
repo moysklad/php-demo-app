@@ -511,12 +511,45 @@ try {
         },
         'testDescriptorContainsChatWindowAndScenarioActions' => function (): void {
             $descriptor = page('/utils/generate-descriptor.php')['body'];
+            check(str_contains($descriptor, '<endpointBase>/api/vendor-endpoint.php</endpointBase>'), 'Default vendor endpoint changed');
             check(str_contains($descriptor, '<iframe type="main" sourceUrl="/entry/iframe.php" useContextKey="false">'), 'No main iframe');
             check(str_contains($descriptor, '<iframe type="chat" sourceUrl="/entry/iframe-chat.php" useContextKey="false">'), 'No chat iframe');
             check(str_contains($descriptor, '<iframe type="mobile" sourceUrl="/entry/iframe-mobile.php"/>'), 'No mobile iframe');
             same(substr_count($descriptor, '<user-context/>'), 4);
             check(str_contains($descriptor, '<action name="log-event" title="Записать событие в журнал решения"/>'), 'No log-event action');
             check(str_contains($descriptor, '<action name="reject" title="Отклонить с сообщением пользователю"/>'), 'No reject action');
+        },
+        'testDescriptorAcceptsSeparateVendorEndpoint' => function (): void {
+            $vendorEndpointUrl = 'http://callback.example/api/vendor-endpoint.php?one=1&two=2';
+            ob_start();
+            require __DIR__ . '/../src/php/utils/descriptor.xml.php';
+            $descriptor = ob_get_clean();
+            check(str_contains($descriptor, '<endpointBase>http://callback.example/api/vendor-endpoint.php?one=1&amp;two=2</endpointBase>'), 'Separate endpoint missing or not escaped');
+            check(str_contains($descriptor, 'sourceUrl="/entry/iframe.php"'), 'Callback changed browser URL');
+        },
+        'testSessionCookieOptions' => function (): void {
+            $secure = getenv('SESSION_COOKIE_SECURE');
+            $sameSite = getenv('SESSION_COOKIE_SAME_SITE');
+            $previous = session_get_cookie_params();
+            try {
+                putenv('SESSION_COOKIE_SECURE');
+                putenv('SESSION_COOKIE_SAME_SITE');
+                ensureSessionStarted();
+                same(session_get_cookie_params()['secure'], true);
+                same(session_get_cookie_params()['samesite'], 'None');
+                session_write_close();
+
+                putenv('SESSION_COOKIE_SECURE=false');
+                putenv('SESSION_COOKIE_SAME_SITE=Lax');
+                ensureSessionStarted();
+                same(session_get_cookie_params()['secure'], false);
+                same(session_get_cookie_params()['samesite'], 'Lax');
+            } finally {
+                session_write_close();
+                session_set_cookie_params($previous);
+                putenv($secure === false ? 'SESSION_COOKIE_SECURE' : 'SESSION_COOKIE_SECURE=' . $secure);
+                putenv($sameSite === false ? 'SESSION_COOKIE_SAME_SITE' : 'SESSION_COOKIE_SAME_SITE=' . $sameSite);
+            }
         },
         'testSessionUnlockedWhileWaitingForRetry' => function () use ($appUrl): void {
             [$sid, $nonce] = sessionContext(true);

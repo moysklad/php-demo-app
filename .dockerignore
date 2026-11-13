@@ -4,6 +4,7 @@
 vendor/
 .env
 .env.local
+docker-compose.local.yaml
 src/php/data/*.app
 src/php/data/*.sqlite
 src/php/data/*.sqlite-wal
