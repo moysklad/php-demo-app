@@ -80,18 +80,36 @@ class LoyaltyInstallation
         $this->pendingExternalSearch = $externalSearch;
     }
 
-    function confirmUpdate(): void
+    /**
+     * МойСклад принял настройки попытки $sent: они становятся действующими, если ожидающий токен все еще ее.
+     * Иначе попытку опередила другая и действующее подключение не меняется. Принятый токен при этом остается
+     * ожидающим, если провайдер перестал бы его принимать: МойСклад может ходить именно с ним.
+     *
+     * @param array{0: ?string, 1: bool} $sent
+     */
+    function confirmUpdate(array $sent): void
     {
-        $this->providerToken = $this->pendingProviderToken;
-        $this->externalSearch = $this->pendingExternalSearch;
-        $this->connectedAt = gmdate('c');
-        $this->clearPending();
+        if ($this->pendingProviderToken === $sent[0]) {
+            [$this->providerToken, $this->externalSearch] = $sent;
+            $this->connectedAt = gmdate('c');
+            $this->clearPending();
+        } elseif ($this->pendingProviderToken === null && $this->providerToken !== $sent[0]) {
+            [$this->pendingProviderToken, $this->pendingExternalSearch] = $sent;
+        }
     }
 
-    /** @param array{0: ?string, 1: bool} $previousPending */
-    function discardUpdate(array $previousPending): void
+    /**
+     * МойСклад отказал попытке $sent: возвращаются ожидающие настройки до нее. Если ожидающий токен уже не ее,
+     * менять нечего.
+     *
+     * @param array{0: ?string, 1: bool} $sent
+     * @param array{0: ?string, 1: bool} $previousPending
+     */
+    function discardUpdate(array $sent, array $previousPending): void
     {
-        [$this->pendingProviderToken, $this->pendingExternalSearch] = $previousPending;
+        if ($this->pendingProviderToken === $sent[0]) {
+            [$this->pendingProviderToken, $this->pendingExternalSearch] = $previousPending;
+        }
     }
 
     private function clearPending(): void
@@ -114,7 +132,7 @@ class LoyaltyInstallation
     }
 }
 
-class LoyaltyInstallationSqliteRepository extends SqliteRepository
+class LoyaltyInstallationPostgresRepository extends PostgresRepository
 {
     public function load(string $appId, string $accountId): ?LoyaltyInstallation
     {
@@ -204,25 +222,6 @@ class LoyaltyInstallationSqliteRepository extends SqliteRepository
         ]);
     }
 
-    protected function initializeSchema(PDO $pdo): void
-    {
-        $pdo->exec('PRAGMA journal_mode=WAL');
-        $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS loyalty_installation (
-                application_id TEXT NOT NULL,
-                account_id TEXT NOT NULL,
-                provider_token TEXT, -- зашифрован APP_ENCRYPT_KEY; NULL: подключения еще не было
-                external_search INTEGER NOT NULL DEFAULT 0,
-                connected_at TEXT, -- NULL: МойСклад не знает о подключении
-                pending_provider_token TEXT, -- зашифрован APP_ENCRYPT_KEY; NULL: нет неподтвержденных настроек
-                pending_external_search INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (application_id, account_id)
-            )'
-        );
-    }
-
     private function fromRow(array $row): LoyaltyInstallation
     {
         $installation = new LoyaltyInstallation((string)$row['application_id'], (string)$row['account_id']);
@@ -236,9 +235,9 @@ class LoyaltyInstallationSqliteRepository extends SqliteRepository
     }
 }
 
-$loyaltyInstallationRepository = new LoyaltyInstallationSqliteRepository();
+$loyaltyInstallationRepository = new LoyaltyInstallationPostgresRepository();
 
-function loyaltyInstallationRepository(): LoyaltyInstallationSqliteRepository
+function loyaltyInstallationRepository(): LoyaltyInstallationPostgresRepository
 {
     return $GLOBALS['loyaltyInstallationRepository'];
 }
@@ -280,6 +279,70 @@ function describeLoyaltyConnection(?LoyaltyInstallation $installation): array
             : 'Внешний поиск покупателей выключен: МойСклад ищет покупателей в своей базе.',
         'externalSearch' => $installation->externalSearch,
     ];
+}
+
+/**
+ * Запоминает новые настройки как ожидающие. Чтение, проверка и запись идут под advisory lock на пару
+ * решение/аккаунт: параллельные запросы одного аккаунта не должны начать подключение с разными токенами.
+ *
+ * @return array{0: LoyaltyInstallation, 1: array{0: ?string, 1: bool}}|null подключение и ожидающие настройки
+ *     до этой попытки; null — исход предыдущей попытки не известен, заменить ее токен другим нельзя
+ */
+function beginLoyaltyUpdate(string $appId, string $accountId, ?string $providerToken, bool $externalSearch): ?array
+{
+    return withLockedLoyaltyInstallation($appId, $accountId, function (LoyaltyInstallation $installation) use ($providerToken, $externalSearch): ?array {
+        if (!$installation->canBeginUpdate($providerToken)) {
+            return null;
+        }
+
+        $attempt = [$installation, $installation->pendingSettings()];
+        $installation->beginUpdate($providerToken, $externalSearch);
+        $installation->persist();
+
+        return $attempt;
+    });
+}
+
+/**
+ * Завершает попытку под той же блокировкой, что и ее начало. Состояние читается заново:
+ * пока шел вызов Vendor API, его могла изменить другая попытка.
+ *
+ * @param array{0: LoyaltyInstallation, 1: array{0: ?string, 1: bool}} $attempt результат beginLoyaltyUpdate
+ */
+function finishLoyaltyUpdate(array $attempt, bool $accepted): LoyaltyInstallation
+{
+    [$started, $pendingBefore] = $attempt;
+    $sent = $started->pendingSettings();
+
+    return withLockedLoyaltyInstallation($started->appId, $started->accountId, function (LoyaltyInstallation $current) use ($sent, $pendingBefore, $accepted): LoyaltyInstallation {
+        if ($accepted) {
+            $current->confirmUpdate($sent);
+        } else {
+            $current->discardUpdate($sent, $pendingBefore);
+        }
+
+        $current->persist();
+
+        return $current;
+    });
+}
+
+function withLockedLoyaltyInstallation(string $appId, string $accountId, callable $change): mixed
+{
+    $pdo = databaseConnection();
+    $pdo->beginTransaction();
+
+    try {
+        $lock = $pdo->prepare('SELECT pg_advisory_xact_lock(hashtext(:key))');
+        $lock->execute([':key' => "loyalty:$appId:$accountId"]);
+        $result = $change(LoyaltyInstallation::load($appId, $accountId) ?? new LoyaltyInstallation($appId, $accountId));
+        $pdo->commit();
+
+        return $result;
+    } catch (Throwable $error) {
+        $pdo->rollBack();
+        throw $error;
+    }
 }
 
 function defaultLoyaltyProviderUrl(): string

@@ -2,7 +2,7 @@
 
 require_once __DIR__ . '/repo.php';
 
-class AppInstanceSqliteRepository extends SqliteRepository
+class AppInstancePostgresRepository extends PostgresRepository
 {
     public function load(string $appId, string $accountId): AppInstance
     {
@@ -56,24 +56,40 @@ class AppInstanceSqliteRepository extends SqliteRepository
             )
             ON CONFLICT(account_id, application_id) DO UPDATE SET
                 status = excluded.status,
-                access_token = excluded.access_token,
+                access_token = CASE WHEN CAST(:keep_access_token AS integer) = 1
+                    THEN account_application.access_token ELSE excluded.access_token END,
                 info_message = excluded.info_message,
                 store = excluded.store,
                 updated_at = excluded.updated_at'
         );
 
         $timestamp = gmdate('c');
+        $accessToken = $this->normalizeNullableString($app->accessToken);
 
         $stmt->execute([
             ':account_id' => (string)$app->accountId,
             ':application_id' => (string)$app->appId,
             ':status' => (int)$app->status,
-            ':access_token' => $this->encryptSecret($this->normalizeNullableString($app->accessToken)),
+            ':access_token' => $this->encryptSecret($accessToken),
+            ':keep_access_token' => $accessToken === null && $this->hasUnreadableAccessToken($app) ? 1 : 0,
             ':info_message' => $this->normalizeNullableString($app->infoMessage),
             ':store' => $this->normalizeNullableString($app->store),
             ':created_at' => $timestamp,
             ':updated_at' => $timestamp,
         ]);
+    }
+
+    // Токен, зашифрованный другим APP_ENCRYPT_KEY, читается как отсутствующий. Сохранение без нового токена
+    // не должно затирать его шифротекст: ключ могли подменить по ошибке, после возврата токен снова прочитается.
+    private function hasUnreadableAccessToken(AppInstance $app): bool
+    {
+        $stmt = $this->connection()->prepare(
+            'SELECT access_token FROM account_application WHERE application_id = :application_id AND account_id = :account_id'
+        );
+        $stmt->execute([':application_id' => (string)$app->appId, ':account_id' => (string)$app->accountId]);
+        $stored = $stmt->fetchColumn();
+
+        return is_string($stored) && $this->decryptSecret($stored, 'access_token') === null;
     }
 
     public function delete(string $appId, string $accountId): void
@@ -107,24 +123,6 @@ class AppInstanceSqliteRepository extends SqliteRepository
             ':account_id' => $accountId,
             ':updated_at' => gmdate('c'),
         ]);
-    }
-
-    protected function initializeSchema(PDO $pdo): void
-    {
-        $pdo->exec('PRAGMA journal_mode=WAL');
-        $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS account_application (
-                account_id TEXT NOT NULL,
-                application_id TEXT NOT NULL,
-                status INTEGER, -- 0=UNKNOWN, 1=SETTINGS_REQUIRED, 2=SUSPENDED, 4=UNINSTALLED, 100=ACTIVATED
-                access_token TEXT,
-                info_message TEXT,
-                store TEXT,
-                created_at TEXT NOT NULL, -- ISO 8601, SQLite не имеет встроенного типа дата/время
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (account_id, application_id)
-            )'
-        );
     }
 
     private function normalizeNullableString(mixed $value): ?string

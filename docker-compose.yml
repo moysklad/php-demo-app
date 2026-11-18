@@ -1,4 +1,20 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: php_demo_app
+      POSTGRES_USER: php_demo_app
+      POSTGRES_PASSWORD: php_demo_app
+    ports:
+      - "${APP_DB_PORT:-5432}:5432"
+    volumes:
+      - php-demo-app-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U php_demo_app -d php_demo_app"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
   frontend:
     image: node:24-alpine
     user: node
@@ -7,29 +23,25 @@ services:
     volumes:
       - ./frontend:/app/frontend
       - ./src/php/assets:/app/src/php/assets
+
   php-demo-app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
     env_file:
       - path: .env.example
         required: true
       - path: .env
         required: false
-    command:
-      - /bin/sh
-      - -lc
-      - |
-        if [ -n "$${APP_DB_PATH:-}" ]; then
-          DATA_DIR="$$(dirname "$$APP_DB_PATH")"
-        else
-          DATA_DIR="/var/www/html/src/php/data"
-        fi
-        mkdir -p "$$DATA_DIR"
-        chown -R www-data:www-data "$$DATA_DIR"
-        chmod 775 "$$DATA_DIR"
-        exec apache2-foreground
+    environment:
+      APP_DB_HOST: postgres
+      APP_DB_PORT: "5432"
     ports:
       - "${APP_PORT:-8085}:80"
     volumes:
       - ./src/php:/var/www/html/src/php
+      - ./db:/var/www/html/db
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  php-demo-app-pgdata:

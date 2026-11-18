@@ -12,7 +12,12 @@ class AppConfig
     public string $appUid = '';
     public string $secretKey = '';
     public string $appBaseUrl = '';
-    public string $databasePath = '';
+    public string $dbHost = '';
+    public string $dbPort = '';
+    public string $dbName = '';
+    public string $dbUser = '';
+    public string $dbPassword = '';
+    public string $dbSchema = '';
     public string $encryptKey = '';
     public string $moyskladVendorApiEndpointUrl = '';
     public string $moyskladJsonApiEndpointUrl = '';
@@ -30,18 +35,6 @@ class AppConfig
 }
 
 $cfg = new AppConfig(require(__DIR__ . '/../config.php'));
-
-function dataDir(): string
-{
-    return __DIR__ . '/../data';
-}
-
-function appDatabasePath(): string
-{
-    $configuredPath = trim(cfg()->databasePath);
-
-    return $configuredPath !== '' ? $configuredPath : dataDir() . '/app.sqlite';
-}
 
 function cfg(): AppConfig
 {
@@ -849,19 +842,20 @@ function describeAppStatus(AppInstance $app): array
     ];
 }
 
+require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/rate-limit.php';
 require_once __DIR__ . '/app-repo.php';
 require_once __DIR__ . '/jwt-repo.php';
 
-$appInstanceRepository = new AppInstanceSqliteRepository();
-$jwtRepository = new JwtSqliteRepository();
+$appInstanceRepository = new AppInstancePostgresRepository();
+$jwtRepository = new JwtPostgresRepository();
 
-function appInstanceRepository(): AppInstanceSqliteRepository
+function appInstanceRepository(): AppInstancePostgresRepository
 {
     return $GLOBALS['appInstanceRepository'];
 }
 
-function jwtRepository(): JwtSqliteRepository
+function jwtRepository(): JwtPostgresRepository
 {
     return $GLOBALS['jwtRepository'];
 }

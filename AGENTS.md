@@ -14,7 +14,7 @@
 - Тесты — спецификация публичного контракта, не цель покрытия. На контракт и важный отказ хватает
   одного-двух тестов; новый тест нужен только там, где поведение не проверяет ни один существующий.
 - Все тесты — в одном `tests/run.php` без фреймворка: PHP-процессы с встроенным сервером, mock внешних API
-  (`tests/mock-api.php` отвечает за JSON API и Vendor API из очереди ответов), curl и SQLite. Группы тестов
+  (`tests/mock-api.php` отвечает за JSON API и Vendor API из очереди ответов), curl и PostgreSQL. Группы тестов
   разделены комментариями: базовый контракт (жизненный цикл, user-context, лояльность), HTTP-клиент, сценарии и чаты.
   Тесты модуля помечены его меткой `[feature:<имя>]`.
 - Дублировать мелкие утилиты внутри модуля можно; добавлять слои индирекции «на будущее» — нельзя.
@@ -49,7 +49,9 @@
 
 ## Команды
 
-- `php tests/run.php` — тесты (PHP 8.2+ с curl, pdo_sqlite, sodium; зависимости через `composer install`),
-  обязательно перед коммитом. Без локального PHP: `docker run --rm -v $PWD:/app -w /app php:8.2-cli php tests/run.php`.
+- `php tests/run.php` — тесты (PHP 8.2+ с curl, pdo_pgsql, sodium; зависимости через `composer install`),
+  обязательно перед коммитом. Нужен PostgreSQL: `docker compose up -d postgres` (параметры — `APP_DB_*` из `.env.example`,
+  прогон работает в своей схеме). Без локального PHP: `docker run --rm --network host -v $PWD:/app -w /app $(docker build -q .) php tests/run.php`.
+- Схема базы меняется только новым файлом `db/migrations/000N_*.sql`, примененные файлы не редактируются.
 - `php src/php/utils/generate-descriptor.php` — `descriptor.xml` в stdout.
 - `docker compose up --build` — локальный запуск (нужен `.env`, см. `README.md`).

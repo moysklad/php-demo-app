@@ -47,7 +47,7 @@ class ScenarioEvent
     }
 }
 
-class ScenarioEventSqliteRepository extends SqliteRepository
+class ScenarioEventPostgresRepository extends PostgresRepository
 {
     // Пишет событие и оставляет на аккаунте только последние SCENARIO_EVENTS_LIMIT записей.
     public function save(ScenarioEvent $event): void
@@ -64,7 +64,8 @@ class ScenarioEventSqliteRepository extends SqliteRepository
                 ) VALUES (
                     :application_id, :account_id, :action_name, :action_type, :object_type, :object_id,
                     :object_name, :outcome, :message, :created_at
-                )'
+                )
+                RETURNING id'
             );
             $stmt->execute([
                 ':application_id' => $event->appId,
@@ -78,7 +79,7 @@ class ScenarioEventSqliteRepository extends SqliteRepository
                 ':message' => $event->message !== '' ? $event->message : null,
                 ':created_at' => $event->createdAt,
             ]);
-            $event->id = (int)$pdo->lastInsertId();
+            $event->id = (int)$stmt->fetchColumn();
 
             $cleanup = $pdo->prepare(
                 'DELETE FROM scenario_event
@@ -117,27 +118,6 @@ class ScenarioEventSqliteRepository extends SqliteRepository
         return array_map(fn(array $row) => $this->fromRow($row), $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
-    protected function initializeSchema(PDO $pdo): void
-    {
-        $pdo->exec('PRAGMA journal_mode=WAL');
-        $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS scenario_event (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                application_id TEXT NOT NULL,
-                account_id TEXT NOT NULL,
-                action_name TEXT NOT NULL,
-                action_type TEXT NOT NULL,
-                object_type TEXT NOT NULL,
-                object_id TEXT NOT NULL,
-                object_name TEXT,
-                outcome TEXT NOT NULL,
-                message TEXT,
-                created_at TEXT NOT NULL
-            )'
-        );
-        $pdo->exec('CREATE INDEX IF NOT EXISTS scenario_event_account ON scenario_event (application_id, account_id, id)');
-    }
-
     private function fromRow(array $row): ScenarioEvent
     {
         $event = new ScenarioEvent(
@@ -158,9 +138,9 @@ class ScenarioEventSqliteRepository extends SqliteRepository
     }
 }
 
-$scenarioEventRepository = new ScenarioEventSqliteRepository();
+$scenarioEventRepository = new ScenarioEventPostgresRepository();
 
-function scenarioEventRepository(): ScenarioEventSqliteRepository
+function scenarioEventRepository(): ScenarioEventPostgresRepository
 {
     return $GLOBALS['scenarioEventRepository'];
 }

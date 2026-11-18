@@ -2,47 +2,36 @@
 
 require_once __DIR__ . '/repo.php';
 
-class JwtSqliteRepository extends SqliteRepository
+class JwtPostgresRepository extends PostgresRepository
 {
-    // Время хранения старых записей в таблице: 24 часа
-    private const JTI_TTL_SECONDS = 86400;
-
     // Вероятность запуска очистки
     // На production лучше установить <= 5, либо вообще запускать через crone
     private const DELETE_EXPIRED_CHANCE_PERCENT = 50;
 
-    public function register(string $jti): bool
+    public function register(string $jti, int $expUnixSeconds): bool
     {
         $this->deleteExpiredMaybe();
 
+        // Повтор jti упирается в первичный ключ: строка вставится только один раз.
         $stmt = $this->connection()->prepare(
-            'INSERT OR IGNORE INTO jwt (
-                jti,
-                create_time
-            ) VALUES (
-                :jti,
-                :create_time
-            )'
+            'INSERT INTO jwt (jti, expires_at) VALUES (:jti, :expires_at)
+            ON CONFLICT (jti) DO NOTHING
+            RETURNING jti'
         );
 
         $stmt->execute([
             ':jti' => $jti,
-            ':create_time' => gmdate('c'),
+            ':expires_at' => $expUnixSeconds * 1000,
         ]);
 
-        return $stmt->rowCount() === 1;
+        return $stmt->fetch() !== false;
     }
 
     public function deleteExpired(): void
     {
-        $stmt = $this->connection()->prepare(
-            'DELETE FROM jwt
-            WHERE create_time < :expired_before'
-        );
+        $stmt = $this->connection()->prepare('DELETE FROM jwt WHERE expires_at <= :now');
 
-        $stmt->execute([
-            ':expired_before' => gmdate('c', time() - self::JTI_TTL_SECONDS),
-        ]);
+        $stmt->execute([':now' => currentEpochMs()]);
     }
 
     private function deleteExpiredMaybe(): void
@@ -53,17 +42,5 @@ class JwtSqliteRepository extends SqliteRepository
         }
 
         $this->deleteExpired();
-    }
-
-    protected function initializeSchema(PDO $pdo): void
-    {
-        $pdo->exec('PRAGMA journal_mode=WAL');
-        $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS jwt (
-                jti TEXT NOT NULL,
-                create_time TEXT NOT NULL,
-                PRIMARY KEY (jti)
-            )'
-        );
     }
 }
