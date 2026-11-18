@@ -1,9 +1,18 @@
 <?php
 
-// Самодостаточные интеграционные тесты: curl, SQLite и отдельные PHP-процессы.
+// Самодостаточные интеграционные тесты: curl, PostgreSQL и отдельные PHP-процессы.
+// База — PostgreSQL из docker-compose.yml (`docker compose up -d postgres`), другой сервер задается APP_DB_*;
+// прогон работает в своей схеме и удаляет ее за собой.
 $directory = sys_get_temp_dir() . '/php-demo-tests-' . bin2hex(random_bytes(6));
 mkdir($directory, 0700);
-putenv('APP_DB_PATH=' . $directory . '/app.sqlite');
+$schema = 'test_' . bin2hex(random_bytes(4));
+putenv('APP_DB_SCHEMA=' . $schema);
+foreach (['APP_DB_HOST' => 'localhost', 'APP_DB_NAME' => 'php_demo_app', 'APP_DB_USER' => 'php_demo_app',
+    'APP_DB_PASSWORD' => 'php_demo_app'] as $name => $default) {
+    if ((string)getenv($name) === '') {
+        putenv($name . '=' . $default);
+    }
+}
 putenv('APP_ENCRYPT_KEY=' . str_repeat('0', 64));
 putenv('APP_ID=test-app');
 putenv('APP_UID=test-app.moysklad');
@@ -13,6 +22,9 @@ ini_set('session.save_path', $directory);
 require __DIR__ . '/../src/php/lib/lib.php';
 // [feature:scenario] действия в сценариях
 require __DIR__ . '/../src/php/scenario/scenario.inc.php';
+// [feature:loyalty] программа лояльности
+require __DIR__ . '/../src/php/loyalty/loyalty.inc.php';
+applyMigrations();
 
 $servers = [];
 $results = [];
@@ -251,6 +263,111 @@ try {
             same($notFound['status'], 404);
             same($notFound['body']['code'], '3007');
         },
+        // APP_NAME=order дает схему order: имя должно попадать в SQL как идентификатор в кавычках.
+        'testReservedWordAsSchemaName' => function () use ($schema): void {
+            cfg()->dbSchema = 'order';
+            try {
+                applyMigrations();
+            } finally {
+                cfg()->dbSchema = $schema;
+                databaseConnection()->exec('DROP SCHEMA IF EXISTS "order" CASCADE');
+            }
+        },
+        // После смены APP_ENCRYPT_KEY токены не расшифровать: они считаются отсутствующими, решение можно удалить и установить заново.
+        'testDataOfAnotherEncryptKeyIsMissing' => function (): void {
+            $currentKey = cfg()->encryptKey;
+            cfg()->encryptKey = str_repeat('1', 64);
+            try {
+                $app = new AppInstance('test-app', 'other-key');
+                $app->accessToken = 'token';
+                $app->status = AppInstance::ACTIVATED;
+                $app->persist();
+                // [feature:loyalty] программа лояльности
+                $installation = new LoyaltyInstallation('test-app', 'other-key');
+                $installation->providerToken = 'old';
+                $installation->connectedAt = gmdate('c');
+                $installation->pendingProviderToken = 'pending';
+                $installation->persist();
+            } finally {
+                cfg()->encryptKey = $currentKey;
+            }
+
+            same(AppInstance::load('test-app', 'other-key')->accessToken, null);
+            $loaded = LoyaltyInstallation::load('test-app', 'other-key');
+            same($loaded->providerToken, null);
+            same($loaded->pendingProviderToken, null);
+            same(vendorRequest('DELETE', 'test-app/other-key', ['cause' => 'Uninstall'])['status'], 200);
+            $install = ['appUid' => 'test-app.moysklad', 'cause' => 'Install', 'access' => [['access_token' => 'token-new']]];
+            same(vendorRequest('PUT', 'test-app/other-key', $install)['status'], 200);
+            same(AppInstance::load('test-app', 'other-key')->accessToken, 'token-new');
+        },
+        // Ключ подменили по ошибке: сохранение настроек не должно затереть токен, после возврата ключа он снова читается.
+        'testSavingWithAnotherEncryptKeyKeepsUnreadableAccessToken' => function (): void {
+            $app = new AppInstance('test-app', 'wrong-key');
+            $app->accessToken = 'token';
+            $app->status = AppInstance::ACTIVATED;
+            $app->persist();
+            $currentKey = cfg()->encryptKey;
+            cfg()->encryptKey = str_repeat('1', 64);
+            try {
+                $loaded = AppInstance::load('test-app', 'wrong-key');
+                same($loaded->accessToken, null);
+                $loaded->infoMessage = 'changed';
+                $loaded->persist();
+            } finally {
+                cfg()->encryptKey = $currentKey;
+            }
+
+            $restored = AppInstance::load('test-app', 'wrong-key');
+            same($restored->accessToken, 'token');
+            same($restored->infoMessage, 'changed');
+        },
+        // [feature:loyalty] два одновременных подключения с разными токенами: второе видит ожидающий токен первого и получает отказ.
+        'testConcurrentLoyaltyUpdatesKeepSinglePendingToken' => function (): void {
+            $pdo = databaseConnection();
+            // Тест держит блокировку аккаунта, пока оба процесса не дойдут до нее, затем отпускает.
+            $pdo->beginTransaction();
+            $pdo->prepare('SELECT pg_advisory_xact_lock(hashtext(:key))')->execute([':key' => 'loyalty:test-app:race']);
+            $workers = [startWorker(['loyalty', 'race', 'token-a']), startWorker(['loyalty', 'race', 'token-b'])];
+            $waiting = $pdo->prepare("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())");
+            $deadline = microtime(true) + 10;
+            do {
+                usleep(50000);
+                $waiting->execute();
+                $blocked = (int)$waiting->fetchColumn();
+            } while ($blocked < 2 && microtime(true) < $deadline);
+            $pdo->commit();
+            same($blocked, 2);
+            $pending = array_column(array_map('finishWorker', $workers), 'pendingToken');
+
+            same(count(array_filter($pending)), 1);
+            same(LoyaltyInstallation::load('test-app', 'race')->pendingProviderToken, array_values(array_filter($pending))[0]);
+        },
+        'testLateLoyaltyReplyKeepsPendingTokenOfNewAttempt' => function (): void {
+            // Две попытки с одним токеном идут параллельно. После ответа первой начинается подключение с другим
+            // токеном, и только потом приходит ответ второй: он не должен стереть токен, который МойСклад мог принять.
+            $first = beginLoyaltyUpdate('test-app', 'late', 'token-a', false);
+            $second = beginLoyaltyUpdate('test-app', 'late', 'token-a', false);
+            finishLoyaltyUpdate($first, true);
+            check(beginLoyaltyUpdate('test-app', 'late', 'token-b', false) !== null, 'New attempt was not started');
+            finishLoyaltyUpdate($second, true);
+            $stored = LoyaltyInstallation::load('test-app', 'late');
+            same($stored->providerToken, 'token-a');
+            same($stored->pendingProviderToken, 'token-b');
+
+            // Отказ первой попытке убрал общий ожидающий токен, но вторую МойСклад принял: провайдер обязан принимать ее токен.
+            $first = beginLoyaltyUpdate('test-app', 'late', 'token-b', false);
+            $second = beginLoyaltyUpdate('test-app', 'late', 'token-b', false);
+            finishLoyaltyUpdate($first, true);
+            finishLoyaltyUpdate($second, true);
+            $first = beginLoyaltyUpdate('test-app', 'late', 'token-c', false);
+            $second = beginLoyaltyUpdate('test-app', 'late', 'token-c', false);
+            finishLoyaltyUpdate($first, false);
+            finishLoyaltyUpdate($second, true);
+            $stored = LoyaltyInstallation::load('test-app', 'late');
+            same($stored->providerToken, 'token-b');
+            same($stored->pendingProviderToken, 'token-c');
+        },
         // [feature:loyalty] подключение Loyalty API: ожидающий токен до подтверждения, провайдер принимает действующий.
         'testLoyaltyConnectAndProvider' => function (): void {
             [$sid, $nonce] = sessionContext(true, 'loyalty');
@@ -291,7 +408,14 @@ try {
             [$userSid, $userNonce] = sessionContext(false, 'loyalty');
             same(jsonRequest('/loyalty/connect.php', ['contextNonce' => $userNonce, 'providerUrl' => $providerUrl, 'providerToken' => 'token-3'], $userSid)['status'], 403);
         },
-        // HTTP-клиент: ретраи по X-Lognex-Retry-After и общая очередь запросов JSON API в SQLite.
+        // Replay-защита service JWT: повтор jti отклоняется первичным ключом таблицы jwt.
+        'testJwtReplayIsRejected' => function (): void {
+            $exp = time() + 300;
+            same(jwtRepository()->register('jti-replay', $exp), true);
+            same(jwtRepository()->register('jti-replay', $exp), false);
+            same(jwtRepository()->register('jti-other', $exp), true);
+        },
+        // HTTP-клиент: ретраи по X-Lognex-Retry-After и общая очередь запросов JSON API в базе.
         'testRetryAfterAndCount' => function () use ($apiUrl): void {
             queueResponses([['status' => 429, 'headers' => ['x-LoGnEx-ReTrY-AfTeR' => '40']], ['status' => 200]]);
             $result = makeHttpRequestDetailed('GET', $apiUrl, 'retry-token', rateLimited: true);
@@ -344,15 +468,14 @@ try {
             }
             check(calls()[2]['at'] - calls()[1]['at'] >= 0.065, 'Success headers did not set request spacing');
         },
-        // Gate живет в SQLite: его видят все PHP workers, чужой токен и API не ждут, простой сбрасывает очередь.
+        // Gate живет в базе: его видят все PHP workers, чужой токен и API не ждут, простой сбрасывает очередь.
         'testGateIsSharedBetweenWorkersPerTokenAndApi' => function (): void {
             $gate = new LognexRateLimitGate('api', 'token');
             $gate->observe(429, ['x-lognex-retry-after' => '1000']);
             check((new LognexRateLimitGate('api', 'token'))->reserveDelay() > 800, 'Gate not shared');
             same((new LognexRateLimitGate('api', 'other'))->reserveDelay(), 0);
             same((new LognexRateLimitGate('other-api', 'token'))->reserveDelay(), 0);
-            $pdo = new PDO('sqlite:' . appDatabasePath());
-            $pdo->exec('UPDATE http_rate_limit SET last_used_at = 0, not_before = 0, spacing_ms = 1000');
+            databaseConnection()->exec('UPDATE http_rate_limit SET last_used_at = 0, not_before = 0, spacing_ms = 1000');
             same($gate->reserveDelay(), 0);
 
             $gate = new LognexRateLimitGate('parallel-api', 'parallel-token');
@@ -583,6 +706,7 @@ try {
         proc_terminate($server);
         proc_close($server);
     }
+    databaseConnection()->exec('DROP SCHEMA IF EXISTS ' . $schema . ' CASCADE');
     if (!$failed) {
         foreach (glob($directory . '/*') as $file) {
             unlink($file);

@@ -34,16 +34,13 @@ $providerToken = is_string($body['providerToken'] ?? null) ? trim($body['provide
 // Новый токен сначала сохраняется как ожидающий: провайдер принимает его вместе с действующим, пока
 // МойСклад не подтвердит настройки. Так решение не получит 401, если МойСклад уже переключился
 // на новый токен, и не сломает работающее подключение, если переключения не было.
-$installation = LoyaltyInstallation::load($appId, $accountId) ?? new LoyaltyInstallation($appId, $accountId);
-if (!$installation->canBeginUpdate($providerToken !== '' ? $providerToken : null)) {
+$attempt = beginLoyaltyUpdate($appId, $accountId, $providerToken !== '' ? $providerToken : null, $externalSearch);
+if ($attempt === null) {
     replyConnectLoyalty(409, ['message' => 'Исход предыдущего подключения еще не известен: МойСклад мог принять отправленный тогда токен. '
         . 'Повторите подключение с пустым полем токена, чтобы отправить его еще раз.']);
 }
-$pendingBefore = $installation->pendingSettings();
-$installation->beginUpdate($providerToken !== '' ? $providerToken : null, $externalSearch);
-$installation->persist();
 
-$result = updateLoyaltySettings($appId, $accountId, $providerUrl, (string)$installation->pendingProviderToken, $externalSearch);
+$result = updateLoyaltySettings($appId, $accountId, $providerUrl, (string)$attempt[0]->pendingProviderToken, $externalSearch);
 
 if ($result['outcome'] === 'unknown') {
     log_message('WARN', "Loyalty settings outcome is unknown for accountId=$accountId: {$result['message']}");
@@ -51,14 +48,12 @@ if ($result['outcome'] === 'unknown') {
 }
 
 if ($result['outcome'] === 'rejected') {
-    $installation->discardUpdate($pendingBefore);
-    $installation->persist();
+    finishLoyaltyUpdate($attempt, false);
     $code = $result['code'] !== null ? "Ошибка {$result['code']}: " : '';
     replyConnectLoyalty(502, ['message' => "Не удалось передать настройки Loyalty API. $code{$result['message']}"]);
 }
 
-$installation->confirmUpdate();
-$installation->persist();
+$installation = finishLoyaltyUpdate($attempt, true);
 
 log_message('INFO', "Loyalty settings sent to MoySklad for accountId=$accountId, externalSearch=" . ($externalSearch ? 'true' : 'false'));
 

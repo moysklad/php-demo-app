@@ -2,9 +2,9 @@
 
 require_once __DIR__ . '/repo.php';
 
-// PHP workers не делят память: очередь одного API и токена хранится в общей SQLite.
-// Транзакция нужна только для резервирования слота; ожидание и HTTP идут без блокировки БД.
-class LognexRateLimitGate extends SqliteRepository
+// PHP workers не делят память: очередь одного API и токена хранится в общей базе.
+// Транзакция с advisory lock нужна только для резервирования слота; ожидание и HTTP идут без блокировки БД.
+class LognexRateLimitGate extends PostgresRepository
 {
     private const IDLE_MS = 10 * 60 * 1000;
     private string $key;
@@ -48,8 +48,10 @@ class LognexRateLimitGate extends SqliteRepository
     private function updateState(callable $update): int
     {
         $pdo = $this->connection();
-        $pdo->exec('BEGIN IMMEDIATE');
+        $pdo->beginTransaction();
         try {
+            $lock = $pdo->prepare('SELECT pg_advisory_xact_lock(hashtext(?))');
+            $lock->execute([$this->key]);
             $now = currentEpochMs();
             $prune = $pdo->prepare('DELETE FROM http_rate_limit WHERE last_used_at <= ? AND not_before <= ?');
             $prune->execute([$now - self::IDLE_MS, $now]);
@@ -61,22 +63,11 @@ class LognexRateLimitGate extends SqliteRepository
                 VALUES (?, ?, ?, ?) ON CONFLICT(gate_key) DO UPDATE SET
                 not_before = excluded.not_before, spacing_ms = excluded.spacing_ms, last_used_at = excluded.last_used_at');
             $save->execute([$this->key, $state['not_before'], $state['spacing_ms'], $now]);
-            $pdo->exec('COMMIT');
+            $pdo->commit();
             return $result;
         } catch (Throwable $error) {
-            $pdo->exec('ROLLBACK');
+            $pdo->rollBack();
             throw $error;
         }
-    }
-
-    protected function initializeSchema(PDO $pdo): void
-    {
-        $pdo->exec('PRAGMA journal_mode=WAL');
-        $pdo->exec('CREATE TABLE IF NOT EXISTS http_rate_limit (
-            gate_key TEXT PRIMARY KEY,
-            not_before REAL NOT NULL,
-            spacing_ms REAL NOT NULL,
-            last_used_at INTEGER NOT NULL
-        )');
     }
 }

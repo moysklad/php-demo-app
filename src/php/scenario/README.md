@@ -7,7 +7,7 @@
 
 - Блок `<scenario>` дескриптора с действиями решения (`utils/descriptor.xml.php` берет список из `scenario.inc.php`).
 - Обработчик `POST .../apps/{appId}/{accountId}/scenario` под service JWT с тремя вариантами ответа Vendor API.
-- Журнал срабатываний в SQLite и его показ в окне чатов (`frontend/src/scenario/ScenarioJournal.tsx`).
+- Журнал срабатываний в PostgreSQL и его показ в окне чатов (`frontend/src/scenario/ScenarioJournal.tsx`).
 
 ## Платформенные особенности (важно)
 
@@ -23,7 +23,7 @@
 
 | Файл                                           | Роль                                                                                          |
 |------------------------------------------------|-----------------------------------------------------------------------------------------------|
-| `scenario.inc.php`                             | Список действий, модель события и SQLite-журнал (последние 50 на аккаунт), обработка действия: `log-event`, `fetch-object`, `reject`; данные журнала для фронта |
+| `scenario.inc.php`                             | Список действий, модель события и PostgreSQL-журнал (последние 50 на аккаунт), обработка действия: `log-event`, `fetch-object`, `reject`; данные журнала для фронта |
 | `events.php`                                   | `POST scenario/events.php` — журнал для окна чатов (авторизация по `contextNonce`)             |
 | `frontend/src/scenario/ScenarioJournal.tsx`    | Журнал: список действий, таблица срабатываний, подробности по клику                           |
 

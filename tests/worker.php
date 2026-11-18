@@ -5,6 +5,11 @@ require __DIR__ . '/../src/php/lib/lib.php';
 if ($argv[1] === 'reserve') {
     $gate = new LognexRateLimitGate('parallel-api', 'parallel-token');
     echo json_encode(['slot' => currentEpochMs() + $gate->reserveDelay()]);
+} elseif ($argv[1] === 'loyalty') {
+    // [feature:loyalty] программа лояльности
+    require __DIR__ . '/../src/php/loyalty/loyalty.inc.php';
+    $attempt = beginLoyaltyUpdate(cfg()->appId, $argv[2], $argv[3], false);
+    echo json_encode(['pendingToken' => $attempt === null ? null : $attempt[0]->pendingProviderToken]);
 } elseif ($argv[1] === 'session') {
     session_id($argv[2]);
     $startedAt = microtime(true);

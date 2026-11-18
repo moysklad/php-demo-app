@@ -18,7 +18,12 @@ return [
     'appUid' => getenv('APP_UID'),
     'appBaseUrl' => getenv('APP_BASE_URL'),
     'secretKey' => getenv('APP_SECRET_KEY'),
-    'databasePath' => getenv('APP_DB_PATH') ?: '',
+    'dbHost' => getenv('APP_DB_HOST') ?: '',
+    'dbPort' => getenv('APP_DB_PORT') ?: '5432',
+    'dbName' => getenv('APP_DB_NAME') ?: '',
+    'dbUser' => getenv('APP_DB_USER') ?: '',
+    'dbPassword' => getenv('APP_DB_PASSWORD') ?: '',
+    'dbSchema' => getenv('APP_DB_SCHEMA') ?: 'public',
     'encryptKey' => getenv('APP_ENCRYPT_KEY'),
     'moyskladVendorApiEndpointUrl' => getenv('MOYSKLAD_VENDOR_API_URL')
         ?: 'https://apps-api.moysklad.ru/api/vendor/1.0',

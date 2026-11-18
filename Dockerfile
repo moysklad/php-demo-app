@@ -12,14 +12,14 @@ FROM php:8.2.35-apache
 # Устанавливаем системные зависимости
 RUN apt-get update && apt-get install -y \
     libzip-dev \
-    libsqlite3-dev \
+    libpq-dev \
     zip \
     unzip \
     libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Устанавливаем расширения PHP
-RUN docker-php-ext-install zip opcache curl pdo_sqlite
+RUN docker-php-ext-install zip opcache curl pdo_pgsql
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
@@ -50,5 +50,5 @@ RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-av
 # Порт, который будет слушать Apache
 EXPOSE 80
 
-# Запускаем Apache в foreground режиме
-CMD ["apache2-foreground"]
+# Применяем миграции схемы и запускаем Apache в foreground режиме
+CMD ["sh", "-c", "php src/php/utils/migrate.php && exec apache2-foreground"]

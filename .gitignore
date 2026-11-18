@@ -1,7 +1,3 @@
-src/php/data/*.app
-src/php/data/*.sqlite
-src/php/data/*.sqlite-wal
-src/php/data/*.sqlite-shm
 vendor/
 .tools/
 .env

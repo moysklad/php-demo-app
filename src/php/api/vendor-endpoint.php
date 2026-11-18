@@ -234,7 +234,7 @@ function authTokenIsValid(array $headers): bool
 
         $jti = (string)$decoded->jti;
 
-        if (!jwtRepository()->register($jti)) {
+        if (!jwtRepository()->register($jti, (int)$decoded->exp)) {
             log_message('WARN', "JTI already used: $jti");
             return false;
         }
